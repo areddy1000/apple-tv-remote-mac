@@ -64,8 +64,13 @@ final class KeyMonitor {
         if event.type == .keyDown {
             // The TV repeats a held button on its own.
             if event.isARepeat { return nil }
-            store.buttonDown(button)
-        } else {
+            if button == .menu {
+                // Back is a click, never a hold. A held Back on tvOS exits to the Home screen.
+                store.click(button)
+            } else {
+                store.buttonDown(button)
+            }
+        } else if button != .menu {
             store.buttonUp(button)
         }
         return nil

@@ -1,173 +1,160 @@
 # Apple TV Remote for Mac
 
-A native macOS remote for any Apple TV on your network. Built with Swift and SwiftUI.
-No web view, no Electron. The app speaks Apple's Companion Link protocol directly, the same
-protocol the Siri Remote and the iPhone Remote use.
+A native macOS remote for any Apple TV on your network. The app is Swift and SwiftUI. It
+speaks the same protocol as the Siri Remote and the iPhone Remote.
 
-![Menu bar and window](docs/screenshot.png)
-
-## Features
-
-- Finds every Apple TV on the local network.
-- Pairs with the four-digit PIN the TV shows. The pairing persists.
-- Clickpad: scroll to swipe, click to select, click an edge to move.
-- Back, TV, Play/Pause, Volume up and down, Siri (hold), and a power button that sleeps an
-  awake TV and wakes a sleeping one.
-- Full keyboard control. Arrow keys, Return, Escape, Space.
-- Types into Apple TV text fields with the Mac keyboard. Return runs a search.
-- Command-K app launcher.
-- Now playing: title, app, artwork and a live progress bar with pause and skip.
-- The menu bar item shows the artwork and the title of what plays. Its panel holds a compact
-  remote with the same card.
-- Control-Option-R summons the window from any app.
-- Switch Apple TVs with Command-1 to Command-9.
-- `atvctl` command line tool for scripts.
-
-## Requirements
-
-- macOS 15 or later.
-- An Apple TV 4K or Apple TV HD on the same network, tvOS 15 or later.
+![The remote window](docs/screenshot.png)
 
 ## Install
 
-### From the DMG
+### Option 1: the DMG
 
 1. Download `AppleTVRemote.dmg` from the Releases page.
-2. Open it and drag **Apple TV Remote** to Applications.
-3. The app is not notarized yet. On the first launch, right-click the app in Applications and
-   choose **Open**, then confirm. macOS asks only once.
-4. Allow local network access when macOS asks. The app needs it to find your Apple TV.
+2. Open the DMG. Drag **Apple TV Remote** to Applications.
+3. Right-click the app in Applications and choose **Open**. Click **Open** in the dialog.
+   macOS shows this dialog one time, because the app is not notarized.
+4. Click **Allow** when macOS asks for local network access. The app needs it to find your
+   Apple TV.
 
-### From source
+### Option 2: build from source
 
-Xcode is not required. The Command Line Tools are enough.
+You do not need Xcode. The Command Line Tools are enough.
 
 ```sh
-xcode-select --install          # once, if you have no Command Line Tools
+xcode-select --install
 git clone https://github.com/areddy1000/apple-tv-remote-mac.git
 cd apple-tv-remote-mac
-scripts/run.sh                  # debug build, bundle, open
-scripts/make-dmg.sh             # release build and dist/AppleTVRemote.dmg
-scripts/test.sh                 # unit tests
+scripts/run.sh
 ```
 
-The scripts set `SDKROOT` to the macOS 26.5 SDK inside the Command Line Tools. When you run
-`swift` by hand, set it first:
+The script builds the app, makes the bundle, and opens it. `scripts/make-dmg.sh` makes a
+release DMG. `scripts/test.sh` runs the unit tests.
 
-```sh
-export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk
-```
+## Pair with your Apple TV
 
-## Use
-
-### First run
-
-1. Open the app. The toolbar shows the first Apple TV it finds. Pick another one from the
-   same menu.
-2. The TV shows a four-digit code. Type it into the sheet and click **Pair**.
-3. A few seconds later the TV shows a second code. This one is for the now-playing link.
+1. Open the app. The toolbar shows the first Apple TV it finds. Click the name to pick
+   another one.
+2. The TV shows a four-digit code. Type the code into the sheet. Click **Pair**.
+3. The TV shows a second code a few seconds later. This code is for the now-playing link.
    Type it in the same way.
 
-Both pairings persist. Later launches connect in under a second with no code.
+The app keeps both pairings. Later launches connect in less than one second with no code.
 
-### The remote
+To pair again, choose **Forget This Apple TV** from the device menu. Then click the device
+name to connect.
+
+## The remote
 
 | Control | Action |
 | --- | --- |
 | Scroll on the clickpad | Swipe |
-| Click the clickpad centre | Select |
-| Click near a clickpad edge | Up, Down, Left or Right |
-| Back, TV, Play/Pause | The same buttons as the Siri Remote |
+| Click the centre of the clickpad | Select |
+| Click near an edge of the clickpad | Up, Down, Left or Right |
+| Back | Go up one level |
+| TV | Go to the Home screen |
+| Play/Pause | Play or pause |
 | Minus, Plus | Volume down, volume up |
-| Microphone | Siri. Hold it while you speak |
-| Power | Sleep an awake TV. Wake a sleeping one |
-| Now-playing card | Pause, play, skip back and forward ten seconds |
+| Microphone | Siri. Hold the button while you speak |
+| Power | Sleep an awake TV. Wake a sleeping TV |
 
-### Keys
+The now-playing card appears at the top while media plays. It shows the artwork, the title,
+the app and a progress bar. The card has pause, play, skip back and skip forward buttons.
+Each skip moves ten seconds.
+
+A volume slider appears below the buttons when the TV reports a volume level. A television
+on HDMI-CEC reports no level, so the slider stays hidden. AirPlay speakers and HomePods
+report a level.
+
+## Keys
 
 | Key | Action |
 | --- | --- |
-| Arrows | Move |
+| Arrow keys | Move |
 | Return | Select |
 | Escape or Delete | Back |
 | Space | Play/Pause |
-| Command-Up, Command-Down | Volume |
-| Command-K | Open an app. Type to filter, Return to launch |
-| Command-T | Type text. Return runs the search. Escape closes the bar |
-| Command-Shift-H | TV (home) |
-| Command-1 to Command-9 | Switch Apple TV |
-| Control-Option-R | Summon the remote from any app |
+| Command-Up, Command-Down | Volume up, volume down |
+| Command-K | Open an app. Type to filter. Press Return to launch |
+| Command-T | Show the text bar |
+| Command-Shift-H | TV (Home screen) |
+| Command-1 to Command-9 | Switch to another Apple TV |
+| Control-Option-R | Bring the remote window to the front from any app |
 
-### Text input
+Hold an arrow key to repeat the move. Hold Return for a long press of Select.
 
-Open a text field on the TV, for example Search. The keyboard bar appears in the app by
-itself. Press Command-T if it does not. Type on the Mac keyboard. Paste works. Return runs
-the search. Escape sends Back and closes the bar.
+## Type on the Apple TV
 
-### Menu bar
+1. Open a text field on the TV. For example, open Search.
+2. The text bar appears in the app. Press Command-T if it does not.
+3. Type on the Mac keyboard. Paste works.
+4. Press Return to run the search.
+5. Press Escape to close the bar and go back one level.
 
-Click the menu bar item for a compact remote. While something plays, the item shows the
-artwork and the title. Open the full window from the panel with the window button.
+## Menu bar
 
-### Command line
+Click the menu bar item to show a compact remote. While media plays, the item shows the
+artwork and the title. Click the window button in the panel to open the full window.
+
+## Command line tool
+
+The build also makes `atvctl`. It shares the pairing with the app. Quit the app before you
+use it, because the Apple TV allows one session for each paired client.
 
 ```sh
 .build/debug/atvctl discover
 .build/debug/atvctl press select
-.build/debug/atvctl press menu --hold 500
+.build/debug/atvctl press menu
+.build/debug/atvctl press play-pause --hold 300
 .build/debug/atvctl swipe down
-.build/debug/atvctl launch com.google.ios.youtube
 .build/debug/atvctl type "hello"
 .build/debug/atvctl apps
-.build/debug/atvctl state
+.build/debug/atvctl launch com.google.ios.youtube
 .build/debug/atvctl media pause
+.build/debug/atvctl state
 .build/debug/atvctl volume 40
 .build/debug/atvctl now-playing --watch 60
 .build/debug/atvctl forget
 ```
 
-Run `atvctl` with no arguments for the full list. Add `--device "Living Room"` to pick one
-Apple TV by name. The Apple TV allows one session for each paired client, so quit the app
-before you use `atvctl`.
+Button names: `up`, `down`, `left`, `right`, `select`, `menu`, `home`, `volume-up`,
+`volume-down`, `siri`, `screensaver`, `sleep`, `wake`, `play-pause`, `channel-up`,
+`channel-down`, `guide`, `page-up`, `page-down`.
 
-### Scripting
+Media names: `play`, `pause`, `toggle`, `next`, `previous`, `skip-forward`, `skip-backward`.
 
-The app answers URL commands. For example from a Shortcut or a terminal:
+Options:
+
+| Option | Meaning |
+| --- | --- |
+| `--device <name>` | Pick the Apple TV by name. The default is the first one found |
+| `--wait <seconds>` | Discovery time before a command runs. The default is 2 |
+| `--hold <ms>` | Hold time for `press`. The default is 0 |
+| `--watch <seconds>` | How long `now-playing` listens. The default is 30 |
+| `--pin-file <path>` | Read the PIN from this file instead of the terminal |
+
+Run `atvctl` with no arguments to see this list.
+
+## URL commands
+
+Other apps and Shortcuts can control the TV through the app with `atvremote://` URLs.
 
 ```sh
 open "atvremote://press/select"
+open "atvremote://press/menu"
 open "atvremote://launch/com.google.ios.youtube"
 open "atvremote://media/pause"
 open "atvremote://device/Living%20Room"
 open "atvremote://wake"
+open "atvremote://sleep"
 ```
 
-Verbs: `press/<button>`, `launch/<bundle-id>`, `media/<play|pause|toggle|next|previous|skip-forward|skip-backward>`,
-`device/<name>`, `wake` and `sleep`.
+The `press` and `media` verbs take the same names as the command line tool.
 
-## Credentials
+## Where the app keeps its data
 
-Pairing keys live in `~/Library/Application Support/AppleTVRemote/credentials.json` with
-mode 0600. Delete the file to pair again. Use **Forget This Apple TV** in the device menu to
-remove one TV.
-
-## Limits
-
-- The volume slider appears only when the Apple TV reports a volume level. An HDMI
-  television controlled over CEC reports none, so the plus and minus keys work but no slider
-  shows. AirPlay speakers and HomePods report a level.
-- The app is ad-hoc signed. `scripts/notarize.sh` signs and notarizes it when a Developer ID
-  is available.
-
-## How it works
-
-- Discovery: Bonjour, `_companion-link._tcp` and `_airplay._tcp`.
-- Control: Companion Link over TCP with HomeKit pairing (SRP-6a, Curve25519, Ed25519) and
-  ChaCha20-Poly1305 encryption. Buttons, touch, text and app launch travel on this link.
-- Now playing: the MediaRemote protocol tunneled over AirPlay 2, with a second HomeKit
-  pairing.
-- The protocol facts come from the pyatv project. Thanks to its authors.
+The pairing keys are in `~/Library/Application Support/AppleTVRemote/`. The files have mode
+0600. Delete the folder to remove every pairing.
 
 ## License
 
-MIT
+MIT. The protocol facts come from the pyatv project. Thank you to its authors.
