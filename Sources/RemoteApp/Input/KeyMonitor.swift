@@ -3,16 +3,31 @@ import AppleTVKit
 
 /// Maps Mac keys to remote buttons with true down and up events.
 /// Keyboard actions never animate. The pressed state shows at once.
+/// The app keeps one instance for its whole life.
 @MainActor
 final class KeyMonitor {
+    /// Virtual key codes from the ANSI keyboard layout.
+    private enum KeyCode {
+        static let returnKey: UInt16 = 36
+        static let keypadEnter: UInt16 = 76
+        static let space: UInt16 = 49
+        static let delete: UInt16 = 51
+        static let escape: UInt16 = 53
+        static let pageUp: UInt16 = 116
+        static let pageDown: UInt16 = 121
+        static let left: UInt16 = 123
+        static let right: UInt16 = 124
+        static let down: UInt16 = 125
+        static let up: UInt16 = 126
+    }
+
     private var monitor: Any?
+    private var observers: [any NSObjectProtocol] = []
     private let store: DeviceStore
 
     init(store: DeviceStore) {
         self.store = store
     }
-
-    private var observers: [Any] = []
 
     func start() {
         guard monitor == nil else { return }
@@ -29,11 +44,6 @@ final class KeyMonitor {
         }
     }
 
-    func stop() {
-        if let monitor { NSEvent.removeMonitor(monitor) }
-        monitor = nil
-    }
-
     private func handle(_ event: NSEvent) -> NSEvent? {
         // A key-up for a button that is down always releases it, whatever has focus.
         if event.type == .keyUp, let button = button(for: event) ?? commandButton(for: event),
@@ -43,10 +53,16 @@ final class KeyMonitor {
         }
         // A text field keeps its keys.
         if let responder = event.window?.firstResponder, responder is NSTextView { return event }
-        // Menus own the Command shortcuts.
-        if event.modifierFlags.contains(.command) { return handleCommand(event) }
-        guard let button = button(for: event) else { return event }
+        // Menus own the Command shortcuts, except the volume keys.
+        let button: RemoteButton?
+        if event.modifierFlags.contains(.command) {
+            button = commandButton(for: event)
+        } else {
+            button = self.button(for: event)
+        }
+        guard let button else { return event }
         if event.type == .keyDown {
+            // The TV repeats a held button on its own.
             if event.isARepeat { return nil }
             store.buttonDown(button)
         } else {
@@ -57,38 +73,26 @@ final class KeyMonitor {
 
     private func button(for event: NSEvent) -> RemoteButton? {
         switch event.keyCode {
-        case 126: .up
-        case 125: .down
-        case 123: .left
-        case 124: .right
-        case 36, 76: .select      // Return, keypad Enter
-        case 53: .menu            // Escape
-        case 49: .playPause       // Space
-        case 51: .menu            // Delete acts as Back
-        case 116: .pageUp
-        case 121: .pageDown
+        case KeyCode.up: .up
+        case KeyCode.down: .down
+        case KeyCode.left: .left
+        case KeyCode.right: .right
+        case KeyCode.returnKey, KeyCode.keypadEnter: .select
+        case KeyCode.escape, KeyCode.delete: .menu
+        case KeyCode.space: .playPause
+        case KeyCode.pageUp: .pageUp
+        case KeyCode.pageDown: .pageDown
         default: nil
         }
     }
 
+    /// Command-Up and Command-Down change the volume.
     private func commandButton(for event: NSEvent) -> RemoteButton? {
         guard event.modifierFlags.contains(.command) else { return nil }
         switch event.keyCode {
-        case 126: return .volumeUp
-        case 125: return .volumeDown
+        case KeyCode.up: return .volumeUp
+        case KeyCode.down: return .volumeDown
         default: return nil
         }
-    }
-
-    /// Volume on Command-Up and Command-Down. Everything else passes to the menu.
-    private func handleCommand(_ event: NSEvent) -> NSEvent? {
-        guard let button = commandButton(for: event) else { return event }
-        if event.type == .keyDown {
-            if event.isARepeat { return nil }
-            store.buttonDown(button)
-        } else {
-            store.buttonUp(button)
-        }
-        return nil
     }
 }

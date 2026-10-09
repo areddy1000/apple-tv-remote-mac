@@ -50,7 +50,6 @@ public enum MRPCommand: Int, Sendable {
     case previousTrack = 6
     case skipForward = 18
     case skipBackward = 19
-    case seekToPlaybackPosition = 20
 }
 
 /// Playback state in SET_STATE.
@@ -182,13 +181,13 @@ public enum MRPMessageBuilder {
         return finish(&writer)
     }
 
-    public static func sendCommand(identifier: String, command: MRPCommand, skipInterval: Float? = nil, position: Double? = nil) -> Data {
+    /// - Parameter skipInterval: Seconds for `skipForward` and `skipBackward`. CommandOptions field 5.
+    public static func sendCommand(identifier: String, command: MRPCommand, skipInterval: Float? = nil) -> Data {
         var inner = ProtobufWriter()
         inner.varint(field: 1, value: UInt64(command.rawValue))
-        if skipInterval != nil || position != nil {
+        if let skipInterval {
             var options = ProtobufWriter()
-            if let skipInterval { options.float(field: 5, value: skipInterval) }
-            if let position { options.double(field: 9, value: position) }
+            options.float(field: 5, value: skipInterval)
             inner.message(field: 2, writer: options)
         }
         var writer = envelope(.sendCommand, identifier: identifier)

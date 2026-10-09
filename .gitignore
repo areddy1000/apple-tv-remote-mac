@@ -1,8 +1,21 @@
+# SwiftPM
 .build/
-dist/
 .swiftpm/
+Package.resolved.bak
+
+# Build products
+dist/
+*.dmg
+
+# Xcode, if someone opens the package there
 *.xcodeproj
+*.xcworkspace
+xcuserdata/
+DerivedData/
+
+# macOS
 .DS_Store
+
 # Agent skill tooling, not part of the app.
 .agents/
 skills-lock.json

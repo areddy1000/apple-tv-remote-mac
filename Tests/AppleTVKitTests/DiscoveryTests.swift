@@ -3,54 +3,46 @@ import Testing
 @testable import AppleTVKit
 
 @Suite struct DiscoveryTests {
-    @Test func rawTXTParsesPairs() {
-        var raw = Data()
-        for entry in ["rpMd=AppleTV14,1", "rpFl=0x36782", "flag"] {
-            raw.append(UInt8(entry.utf8.count))
-            raw.append(contentsOf: Array(entry.utf8))
-        }
-        let txt = TXTRecord.parse(raw: raw)
-        #expect(txt["rpMd"] == "AppleTV14,1")
-        #expect(txt["rpFl"] == "0x36782")
-        #expect(txt["flag"] == "")
-    }
+    /// Synthetic identifiers. They look like the TXT records but belong to no real device.
+    private static let joinID = "11111111-2222-3333-4444-555555555555"
+    private static let mac = "02:00:00:00:00:01"
 
-    @Test func mergeJoinsByPSI() {
+    @Test func mergeJoinsByPSI() throws {
         let companion = [
             "Living Room": ServiceRecord(name: "Living Room", txt: [
                 "rpMd": "AppleTV14,1",
-                "rpMRtID": "57BB045C-3E7D-4E6D-B345-CB3844A9968B",
+                "rpMRtID": Self.joinID,
             ]),
-            "MacBook Pro (2)": ServiceRecord(name: "MacBook Pro (2)", txt: ["rpMd": "MacBookPro18,1"]),
+            "Office Mac": ServiceRecord(name: "Office Mac", txt: ["rpMd": "MacBookPro18,1"]),
         ]
         let airplay = [
             "Living Room": ServiceRecord(name: "Living Room", txt: [
                 "model": "AppleTV14,1",
-                "psi": "57BB045C-3E7D-4E6D-B345-CB3844A9968B",
-                "deviceid": "56:BB:04:5C:3E:7D",
+                "psi": Self.joinID,
+                "deviceid": Self.mac,
                 "osvers": "26.6",
             ]),
-            "MacBook Pro (2)": ServiceRecord(name: "MacBook Pro (2)", txt: ["model": "MacBookPro18,1"]),
+            "Office Mac": ServiceRecord(name: "Office Mac", txt: ["model": "MacBookPro18,1"]),
         ]
         let devices = DeviceMerger.merge(companion: companion, airplay: airplay)
         #expect(devices.count == 1)
-        let device = try! #require(devices.first)
-        #expect(device.id == "57BB045C-3E7D-4E6D-B345-CB3844A9968B")
+        let device = try #require(devices.first)
+        #expect(device.id == Self.joinID)
         #expect(device.name == "Living Room")
         #expect(device.model == "AppleTV14,1")
         #expect(device.modelDisplayName == "Apple TV 4K (3rd gen)")
-        #expect(device.macAddress == "56:BB:04:5C:3E:7D")
+        #expect(device.macAddress == Self.mac)
         #expect(device.osVersion == "26.6")
         #expect(device.isAppleTV)
     }
 
     @Test func mergeFallsBackToName() {
         let companion = ["Bedroom": ServiceRecord(name: "Bedroom", txt: ["rpMd": "AppleTV6,2"])]
-        let airplay = ["Bedroom": ServiceRecord(name: "Bedroom", txt: ["model": "AppleTV6,2", "deviceid": "AA:BB:CC:DD:EE:FF"])]
+        let airplay = ["Bedroom": ServiceRecord(name: "Bedroom", txt: ["model": "AppleTV6,2", "deviceid": Self.mac])]
         let devices = DeviceMerger.merge(companion: companion, airplay: airplay)
         #expect(devices.count == 1)
         #expect(devices.first?.id == "Bedroom")
-        #expect(devices.first?.macAddress == "AA:BB:CC:DD:EE:FF")
+        #expect(devices.first?.macAddress == Self.mac)
     }
 
     @Test func mergeKeepsAirPlayOnlyAppleTV() {
@@ -71,11 +63,13 @@ import Testing
     }
 
     @Test func magicPacketLayout() throws {
-        let packet = try WakeOnLAN.magicPacket(mac: "56:BB:04:5C:3E:7D")
+        let packet = try WakeOnLAN.magicPacket(mac: Self.mac)
+        let address: [UInt8] = [0x02, 0x00, 0x00, 0x00, 0x00, 0x01]
         #expect(packet.count == 6 + 16 * 6)
         #expect(packet.prefix(6) == Data(repeating: 0xFF, count: 6))
-        #expect(Array(packet[6..<12]) == [0x56, 0xBB, 0x04, 0x5C, 0x3E, 0x7D])
-        #expect(Array(packet.suffix(6)) == [0x56, 0xBB, 0x04, 0x5C, 0x3E, 0x7D])
+        #expect(Array(packet[6..<12]) == address)
+        #expect(Array(packet.suffix(6)) == address)
+        #expect(try WakeOnLAN.magicPacket(mac: "02-00-00-00-00-01") == packet)
         #expect(throws: WakeOnLAN.WakeError.self) { try WakeOnLAN.magicPacket(mac: "nope") }
     }
 }

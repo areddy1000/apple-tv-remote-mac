@@ -14,14 +14,16 @@ public enum AirPlayHTTPError: Error, Sendable, Equatable {
 /// After pair-verify every byte is sealed in HAP frames.
 /// The device sends its own requests on the event channel. They arrive on `incomingRequests`.
 public actor AirPlayHTTPConnection {
-    public let host: String
-    public let port: UInt16
+    let host: String
+    let port: UInt16
     private let connection: NWConnection
     private let queue = DispatchQueue(label: "atv.airplay.http", qos: .userInitiated)
     private var cipher: HAPFramedCipher?
     private var sealedBuffer = Data()
     private var plainBuffer = Data()
-    private var pending: [CheckedContinuation<HTTPResponse, Error>] = []
+    /// Requests that wait for a response, oldest first. Responses arrive in request order.
+    private var pending: [(id: UInt64, continuation: CheckedContinuation<HTTPResponse, Error>)] = []
+    private var nextRequestID: UInt64 = 0
     private var isOpen = false
     private(set) public var localAddress: String?
     public nonisolated let incomingRequests: AsyncStream<HTTPRequest>
@@ -106,11 +108,13 @@ public actor AirPlayHTTPConnection {
             ATVLog.airplay.debug("send \(method, privacy: .public) \(path, privacy: .public) \(body?.count ?? 0) bytes")
         }
         try await write(data)
+        let requestID = nextRequestID
+        nextRequestID += 1
         let response: HTTPResponse = try await withCheckedThrowingContinuation { continuation in
-            pending.append(continuation)
+            pending.append((requestID, continuation))
             Task { [weak self] in
                 try? await Task.sleep(for: timeout)
-                await self?.expire(continuation: continuation, label: "\(method) \(path)")
+                await self?.expire(requestID: requestID, label: "\(method) \(path)")
             }
         }
         if Self.trace {
@@ -119,12 +123,11 @@ public actor AirPlayHTTPConnection {
         return response
     }
 
-    private func expire(continuation: CheckedContinuation<HTTPResponse, Error>, label: String) {
-        // A continuation is not Equatable. Match by position: the oldest pending one.
-        // The request that timed out is the oldest because responses come in order.
-        guard !pending.isEmpty else { return }
-        let first = pending.removeFirst()
-        first.resume(throwing: AirPlayHTTPError.timeout(label))
+    /// Fails one request that got no answer in time. A request that was answered is left alone.
+    private func expire(requestID: UInt64, label: String) {
+        guard let index = pending.firstIndex(where: { $0.id == requestID }) else { return }
+        let expired = pending.remove(at: index)
+        expired.continuation.resume(throwing: AirPlayHTTPError.timeout(label))
     }
 
     /// Answers a request the device sent us.
@@ -189,7 +192,7 @@ public actor AirPlayHTTPConnection {
             switch message {
             case .response(let response):
                 if !pending.isEmpty {
-                    pending.removeFirst().resume(returning: response)
+                    pending.removeFirst().continuation.resume(returning: response)
                 } else {
                     ATVLog.airplay.debug("response with no request: \(response.status)")
                 }
@@ -203,8 +206,8 @@ public actor AirPlayHTTPConnection {
         guard isOpen else { return }
         isOpen = false
         connection.cancel()
-        for continuation in pending {
-            continuation.resume(throwing: AirPlayHTTPError.closed)
+        for request in pending {
+            request.continuation.resume(throwing: AirPlayHTTPError.closed)
         }
         pending.removeAll()
         incomingContinuation.finish()

@@ -18,10 +18,11 @@ public actor DeviceBrowser {
     private var isRunning = false
     private let queue = DispatchQueue(label: "atv.discovery")
 
+    /// Delay before a failed browser restarts.
+    private static let restartDelay: Duration = .seconds(2)
+
     public init() {
-        var continuation: AsyncStream<[DiscoveredDevice]>.Continuation!
-        self.devices = AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation = $0 }
-        self.continuation = continuation
+        (devices, continuation) = AsyncStream.makeStream(of: [DiscoveredDevice].self, bufferingPolicy: .bufferingNewest(1))
     }
 
     /// Starts both browsers. A second call does nothing.
@@ -83,13 +84,12 @@ public actor DeviceBrowser {
         }
     }
 
-    /// Replaces the failed browser after two seconds.
+    /// Replaces the failed browser after a short delay.
     private func restart(type: String) {
         guard isRunning else { return }
-        // The task inherits the actor isolation, so the call needs no await.
         Task {
-            try? await Task.sleep(for: .seconds(2))
-            self.replaceBrowser(type: type)
+            try? await Task.sleep(for: Self.restartDelay)
+            replaceBrowser(type: type)
         }
     }
 
@@ -123,42 +123,40 @@ public actor DeviceBrowser {
         guard case .service(let name, _, _, _) = result.endpoint else { return nil }
         var txt: [String: String] = [:]
         if case .bonjour(let record) = result.metadata {
-            txt = TXTRecord.parse(record)
+            txt = record.dictionary
         }
         return ServiceRecord(name: name, txt: txt, endpoint: result.endpoint)
     }
 
     /// Resolves a Bonjour service endpoint to a host and a port.
     /// It opens a TCP connection, reads the remote endpoint, and closes it.
+    /// IPv4 only: a link-local IPv6 address needs an interface scope that other
+    /// connections cannot get back from the text form.
     public static func resolve(_ endpoint: NWEndpoint) async throws -> (host: String, port: UInt16) {
-        // IPv4 only. A link-local IPv6 address loses its interface scope as text and cannot connect.
         let parameters = NWParameters.tcp
-        if ProcessInfo.processInfo.environment["ATV_RESOLVE_ANY"] != "1",
-           let ip = parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
+        if let ip = parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options {
             ip.version = .v4
         }
         let connection = NWConnection(to: endpoint, using: parameters)
-        ATVLog.discovery.debug("resolving \(String(describing: endpoint), privacy: .public)")
         let queue = DispatchQueue(label: "atv.discovery.resolve")
-        let box = ResumeBox()
         return try await withCheckedThrowingContinuation { continuation in
+            let once = ResumeOnce(continuation)
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
                     guard case .hostPort(let host, let port)? = connection.currentPath?.remoteEndpoint else {
-                        box.resume(continuation, with: .failure(ResolveError.noRemoteEndpoint))
+                        once.resume(.failure(ResolveError.noRemoteEndpoint))
                         connection.cancel()
                         return
                     }
-                    let text = Self.hostText(host)
                     // Resume first. A cancel can report the cancelled state before this handler returns.
-                    box.resume(continuation, with: .success((text, port.rawValue)))
+                    once.resume(.success((Self.hostText(host), port.rawValue)))
                     connection.cancel()
                 case .failed(let error):
                     connection.cancel()
-                    box.resume(continuation, with: .failure(error))
+                    once.resume(.failure(error))
                 case .cancelled:
-                    box.resume(continuation, with: .failure(ResolveError.cancelled))
+                    once.resume(.failure(ResolveError.cancelled))
                 default:
                     break
                 }
@@ -167,11 +165,10 @@ public actor DeviceBrowser {
         }
     }
 
-    /// Returns the address text. A link-local IPv6 address keeps its "%interface" suffix.
-    /// Network.framework needs that suffix to connect. An IPv4 address never has one.
+    /// Returns the address or name as text.
     static func hostText(_ host: NWEndpoint.Host) -> String {
         switch host {
-        case .ipv4(let address): return "\(address)".components(separatedBy: "%").first ?? "\(address)"
+        case .ipv4(let address): return "\(address)"
         case .ipv6(let address): return "\(address)"
         case .name(let name, _): return name
         @unknown default: return "\(host)"
@@ -181,22 +178,5 @@ public actor DeviceBrowser {
     public enum ResolveError: Error {
         case noRemoteEndpoint
         case cancelled
-    }
-}
-
-/// Guards a continuation so it resumes one time only.
-private final class ResumeBox: @unchecked Sendable {
-    private let lock = NSLock()
-    private var done = false
-
-    func resume(
-        _ continuation: CheckedContinuation<(host: String, port: UInt16), Error>,
-        with result: Result<(host: String, port: UInt16), Error>
-    ) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !done else { return }
-        done = true
-        continuation.resume(with: result)
     }
 }

@@ -47,7 +47,7 @@ public struct MRPPlayerStateManager: Sendable {
         switch type {
         case .setState:
             guard let state = MRPSetState.decode(message) else { return false }
-            ATVLog.mrp.debug("set state client \(state.playerPath.bundleIdentifier ?? "-", privacy: .public) player \(state.playerPath.playerDisplayName ?? "-", privacy: .public) playback \(state.playbackState.map { String(describing: $0) } ?? "-", privacy: .public) items \(state.items?.count ?? -1) title \(state.items?.first?.metadata?.title ?? "-", privacy: .public)")
+            ATVLog.mrp.debug("set state client \(state.playerPath.bundleIdentifier ?? "-", privacy: .public) playback \(state.playbackState.map { String(describing: $0) } ?? "-", privacy: .public) items \(state.items?.count ?? -1) title \(state.items?.first?.metadata?.title ?? "-", privacy: .private)")
             // A state with a live playback stands in for the missing "now playing client" message.
             if activeClientID == nil, let playback = state.playbackState, playback == .playing || playback == .paused,
                let bundle = state.playerPath.bundleIdentifier {
@@ -318,13 +318,12 @@ public actor MRPSession {
             nowPlayingContinuation.yield(current)
         }
         if Self.trace, let metadata = state.activeClient?.activePlayer?.currentItem?.metadata {
-            ATVLog.mrp.debug("active item metadata \(String(describing: metadata), privacy: .public)")
+            ATVLog.mrp.debug("active item metadata \(String(describing: metadata), privacy: .private)")
         }
         // Some apps send a thin state first. The queue request returns the full metadata.
         let itemKey = state.activeItemIdentifier ?? "current"
         if state.needsArtwork || state.needsMetadata, artworkRequested != itemKey {
-            let item = itemKey
-            artworkRequested = item
+            artworkRequested = itemKey
             try? await channel.send(protobuf: MRPMessageBuilder.playbackQueueRequest(identifier: UUID().uuidString, location: Int32(state.activeLocation)))
         }
     }
@@ -341,12 +340,6 @@ public actor MRPSession {
         case .skipForward: data = MRPMessageBuilder.sendCommand(identifier: UUID().uuidString, command: .skipForward, skipInterval: 10)
         case .skipBackward: data = MRPMessageBuilder.sendCommand(identifier: UUID().uuidString, command: .skipBackward, skipInterval: 10)
         }
-        _ = try await request(data, identifier: nil, timeout: .seconds(5))
-    }
-
-    /// Seeks to an absolute position in seconds.
-    public func seek(to position: Double) async throws {
-        let data = MRPMessageBuilder.sendCommand(identifier: UUID().uuidString, command: .seekToPlaybackPosition, position: position)
         _ = try await request(data, identifier: nil, timeout: .seconds(5))
     }
 

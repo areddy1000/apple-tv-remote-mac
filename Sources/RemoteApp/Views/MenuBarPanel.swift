@@ -13,10 +13,11 @@ struct MenuBarPanel: View {
                 Spacer()
                 StatusBadge()
                 Button {
-                    openWindow(id: "main")
+                    openWindow(id: RemoteApp.mainWindowID)
                     NSApp.activate(ignoringOtherApps: true)
                 } label: {
-                    Image(systemName: "macwindow")
+                    Label("Open Window", systemImage: "macwindow")
+                        .labelStyle(.iconOnly)
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(Tokens.inkSecondary)

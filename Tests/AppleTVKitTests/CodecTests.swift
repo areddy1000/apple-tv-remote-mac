@@ -64,8 +64,7 @@ import Testing
     }
 
     @Test func opackDecodesPointers() throws {
-        // ["abc", 7 (0x30 one byte? no, small), "abc" via pointer 0xA0]
-        // Object list: "abc" at index 0. Pointer 0xA0 references index 0.
+        // ["abc", 1, "abc"]. The small int is not in the object list, so 0xA0 points at "abc".
         let bytes = Data([0xD3, 0x43, 0x61, 0x62, 0x63, 0x09, 0xA0])
         let decoded = try OPACK.decode(bytes)
         #expect(decoded == .array([.string("abc"), .int(1), .string("abc")]))
@@ -84,6 +83,11 @@ import Testing
         let encoded = OPACK.encode(value)
         #expect(encoded == Data([0xD2, 0x46] + Array("repeat".utf8) + [0xA0]))
         #expect(try OPACK.decode(encoded) == value)
+    }
+
+    @Test func opackEncodesDictionaryKeysInSortedOrder() {
+        let value: OPACKValue = .dictionary(["b": .int(2), "a": .int(1)])
+        #expect(OPACK.encode(value) == Data([0xE2, 0x41, 0x61, 0x09, 0x41, 0x62, 0x0A]))
     }
 
     @Test func opackDecodesEndlessCollections() throws {

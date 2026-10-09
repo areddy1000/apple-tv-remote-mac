@@ -6,33 +6,35 @@ public enum CompanionConnectionError: Error, Sendable {
     case closed
     case cancelled
     case failed(String)
-    case decrypt
 }
 
 /// A TCP link to one Apple TV. Frames go out in order on a dedicated queue.
 /// After pair-verify the OPACK frames are encrypted. Pairing frames stay clear.
 public actor CompanionConnection {
     public let endpoint: NWEndpoint
+    public nonisolated let frames: AsyncStream<CompanionFrame>
+
     private let connection: NWConnection
     private let queue = DispatchQueue(label: "atv.companion", qos: .userInteractive)
+    private let framesContinuation: AsyncStream<CompanionFrame>.Continuation
     private var cipher: ChaChaCounterCipher?
     private var buffer = Data()
-    private var inbound: AsyncStream<CompanionFrame>.Continuation?
-    public nonisolated let frames: AsyncStream<CompanionFrame>
-    private let framesContinuation: AsyncStream<CompanionFrame>.Continuation
     private var isOpen = false
+
+    /// Logs every frame when ATV_TRACE is set. Development aid. Payloads stay private.
+    static let trace = ProcessInfo.processInfo.environment["ATV_TRACE"] == "1"
 
     public init(endpoint: NWEndpoint) {
         self.endpoint = endpoint
-        let params = NWParameters.tcp
-        params.includePeerToPeer = false
-        if let tcp = params.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
+        let parameters = NWParameters.tcp
+        parameters.includePeerToPeer = false
+        if let tcp = parameters.defaultProtocolStack.transportProtocol as? NWProtocolTCP.Options {
             tcp.noDelay = true
             tcp.connectionTimeout = 8
             tcp.enableKeepalive = true
             tcp.keepaliveIdle = 15
         }
-        self.connection = NWConnection(to: endpoint, using: params)
+        self.connection = NWConnection(to: endpoint, using: parameters)
         let (stream, continuation) = AsyncStream.makeStream(of: CompanionFrame.self, bufferingPolicy: .unbounded)
         self.frames = stream
         self.framesContinuation = continuation
@@ -42,18 +44,18 @@ public actor CompanionConnection {
     public func open() async throws {
         guard !isOpen else { return }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            let box = ResumeOnce(continuation)
+            let once = ResumeOnce(continuation)
             connection.stateUpdateHandler = { [weak self] state in
                 guard let self else { return }
                 switch state {
                 case .ready:
-                    box.resume(.success(()))
+                    once.resume(.success(()))
                     Task { await self.markOpen() }
                 case .failed(let error):
-                    box.resume(.failure(CompanionConnectionError.failed(error.localizedDescription)))
+                    once.resume(.failure(CompanionConnectionError.failed(error.localizedDescription)))
                     Task { await self.close() }
                 case .cancelled:
-                    box.resume(.failure(CompanionConnectionError.cancelled))
+                    once.resume(.failure(CompanionConnectionError.cancelled))
                     Task { await self.close() }
                 case .waiting(let error):
                     ATVLog.companion.info("waiting: \(error.localizedDescription, privacy: .public)")
@@ -71,38 +73,25 @@ public actor CompanionConnection {
         receiveLoop()
     }
 
-    /// Remote host and port as resolved by the socket.
-    public func remote() -> (host: String, port: UInt16)? {
-        guard let path = connection.currentPath, let remote = path.remoteEndpoint else { return nil }
-        if case .hostPort(let host, let port) = remote {
-            return (host.debugDescription, port.rawValue)
-        }
-        return nil
-    }
-
     /// Installs the session cipher after pair-verify.
     public func enableEncryption(outKey: SymmetricKey, inKey: SymmetricKey) {
         cipher = ChaChaCounterCipher(outKey: outKey, inKey: inKey, layout: .counter12)
     }
-
-    /// Logs every frame when ATV_TRACE is set. Development aid.
-    static let trace = ProcessInfo.processInfo.environment["ATV_TRACE"] == "1"
 
     /// Sends one frame. Encrypts OPACK frames when the cipher is set.
     public func send(_ frame: CompanionFrame) async throws {
         guard isOpen else { throw CompanionConnectionError.closed }
         let data: Data
         if var cipher, !frame.type.isAuth {
-            let aad = CompanionFrame.header(type: frame.type, length: frame.payload.count + 16)
-            let sealed = try cipher.encrypt(frame.payload, aad: aad)
+            let header = CompanionFrame.header(type: frame.type, length: frame.payload.count + 16)
+            let sealed = try cipher.encrypt(frame.payload, aad: header)
             self.cipher = cipher
-            data = aad + sealed
+            data = header + sealed
         } else {
             data = frame.encoded()
         }
         if Self.trace {
-            let text = (try? OPACK.decode(frame.payload)).map { String(describing: $0) } ?? frame.payload.hexString
-            ATVLog.companion.debug("send \(frame.type.rawValue) \(text, privacy: .public)")
+            ATVLog.companion.debug("send type \(frame.type.rawValue) \(frame.payload.count) bytes \(Self.describe(frame.payload), privacy: .private)")
         }
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             connection.send(content: data, completion: .contentProcessed { error in
@@ -113,6 +102,10 @@ public actor CompanionConnection {
                 }
             })
         }
+    }
+
+    private static func describe(_ payload: Data) -> String {
+        (try? OPACK.decode(payload)).map { String(describing: $0) } ?? payload.hexString
     }
 
     private func receiveLoop() {
@@ -139,40 +132,22 @@ public actor CompanionConnection {
                     delivered.payload = try cipher.decrypt(frame.payload, aad: header)
                     self.cipher = cipher
                 } catch {
-                    ATVLog.companion.error("decrypt failed for frame \(frame.type.rawValue)")
+                    ATVLog.companion.error("decrypt failed for frame type \(frame.type.rawValue)")
                     continue
                 }
             }
             if Self.trace {
-                let text = (try? OPACK.decode(delivered.payload)).map { String(describing: $0) } ?? delivered.payload.hexString
-                ATVLog.companion.debug("recv \(frame.type.rawValue) \(text, privacy: .public)")
+                ATVLog.companion.debug("recv type \(frame.type.rawValue) \(delivered.payload.count) bytes \(Self.describe(delivered.payload), privacy: .private)")
             }
             framesContinuation.yield(delivered)
         }
     }
 
+    /// Cancels the socket and ends the frame stream.
     public func close() {
         guard isOpen || connection.state != .cancelled else { return }
         isOpen = false
         connection.cancel()
         framesContinuation.finish()
-    }
-}
-
-/// Resumes a continuation one time only.
-final class ResumeOnce<T: Sendable>: @unchecked Sendable {
-    private var continuation: CheckedContinuation<T, Error>?
-    private let lock = NSLock()
-
-    init(_ continuation: CheckedContinuation<T, Error>) {
-        self.continuation = continuation
-    }
-
-    func resume(_ result: Result<T, Error>) {
-        lock.lock()
-        let c = continuation
-        continuation = nil
-        lock.unlock()
-        c?.resume(with: result)
     }
 }

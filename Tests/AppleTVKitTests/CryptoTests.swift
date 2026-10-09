@@ -4,23 +4,21 @@ import SRP
 import Testing
 @testable import AppleTVKit
 
-@Suite("CryptoTests")
-struct CryptoTests {
+@Suite struct CryptoTests {
     // MARK: - Counter cipher
 
-    @Test func counterCipherRoundTripBothDirections() throws {
+    @Test func counterCipherRoundTripsBothDirections() throws {
         let k1 = SymmetricKey(size: .bits256)
         let k2 = SymmetricKey(size: .bits256)
-        var client = ChaChaCounterCipher(outKey: k1, inKey: k2)
-        var server = ChaChaCounterCipher(outKey: k2, inKey: k1)
+        var client = ChaChaCounterCipher(outKey: k1, inKey: k2, layout: .counter12)
+        var server = ChaChaCounterCipher(outKey: k2, inKey: k1, layout: .counter12)
         let aad = Data([0x08, 0x00, 0x00, 0x10])
 
         for index in 0..<5 {
             let message = Data("hello \(index)".utf8)
             let sealed = try client.encrypt(message, aad: aad)
             #expect(sealed.count == message.count + 16)
-            let opened = try server.decrypt(sealed, aad: aad)
-            #expect(opened == message)
+            #expect(try server.decrypt(sealed, aad: aad) == message)
 
             let reply = Data("reply \(index)".utf8)
             let sealedReply = try server.encrypt(reply, aad: aad)
@@ -31,24 +29,29 @@ struct CryptoTests {
     @Test func counterCipherRejectsWrongAAD() throws {
         let k1 = SymmetricKey(size: .bits256)
         let k2 = SymmetricKey(size: .bits256)
-        var client = ChaChaCounterCipher(outKey: k1, inKey: k2)
-        var server = ChaChaCounterCipher(outKey: k2, inKey: k1)
+        var client = ChaChaCounterCipher(outKey: k1, inKey: k2, layout: .zeroPrefixed8)
+        var server = ChaChaCounterCipher(outKey: k2, inKey: k1, layout: .zeroPrefixed8)
         let sealed = try client.encrypt(Data([1, 2, 3]), aad: Data([1]))
         #expect(throws: HAPError.decryptFailed) {
             try server.decrypt(sealed, aad: Data([2]))
         }
     }
 
-    @Test func counterNonceLayout() {
-        let nonce = ChaChaCounterCipher.nonce(for: 0x0102030405060708)
-        let bytes = nonce.withUnsafeBytes { Data($0) }
-        #expect(bytes == Data([0, 0, 0, 0, 0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]))
+    @Test func counterNonceLayouts() {
+        let counter: UInt64 = 0x0102_0304_0506_0708
+        let little: [UInt8] = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]
+        let zeros: [UInt8] = [0, 0, 0, 0]
+
+        let prefixed = ChaChaCounterCipher.nonce(for: counter, layout: .zeroPrefixed8)
+        #expect(prefixed.withUnsafeBytes { Data($0) } == Data(zeros + little))
+
+        let full = ChaChaCounterCipher.nonce(for: counter, layout: .counter12)
+        #expect(full.withUnsafeBytes { Data($0) } == Data(little + zeros))
     }
 
     @Test func labelNonceIsLeftPadded() {
         let nonce = HAPCrypto.nonce("PS-Msg05")
-        let bytes = nonce.withUnsafeBytes { Data($0) }
-        #expect(bytes == Data([0, 0, 0, 0]) + Data("PS-Msg05".utf8))
+        #expect(nonce.withUnsafeBytes { Data($0) } == Data([0, 0, 0, 0]) + Data("PS-Msg05".utf8))
     }
 
     // MARK: - Framed cipher
@@ -92,31 +95,14 @@ struct CryptoTests {
         #expect(HAPKDF.bytes(of: a).count == 32)
     }
 
-    // MARK: - TLV8
+    // MARK: - Hex
 
-    @Test func tlvFragmentsLongValues() {
-        let long = Data((0..<384).map { UInt8($0 % 256) })
-        let encoded = HAPTLV.encode([(HAPTag.state, Data([3])), (HAPTag.publicKey, long)])
-        // 1 + 2 bytes for the state, then 255 + 2 and 129 + 2 for the key.
-        #expect(encoded.count == 3 + 257 + 131)
-        let decoded = HAPTLV.decode(encoded)
-        #expect(decoded[HAPTag.publicKey] == long)
-        #expect(decoded[HAPTag.state] == Data([3]))
-    }
-
-    @Test func opackNameDictionary() {
-        let encoded = HAPTLV.encodeNameDictionary("Mac")
-        #expect(encoded == Data([0xE1, 0x44]) + Data("name".utf8) + Data([0x43]) + Data("Mac".utf8))
-    }
-
-    // MARK: - Credentials
-
-    @Test func credentialsStringRoundTrip() {
-        let creds = HAPCredentials(ltpk: Data([1, 2]), ltsk: Data([3]), accessoryID: Data("AA".utf8), clientID: Data("id".utf8))
-        let string = creds.description
-        #expect(string == "0102:03:4141:6964")
-        #expect(HAPCredentials(string: string) == creds)
-        #expect(HAPCredentials(string: "zz:1:2") == nil)
+    @Test func hexRoundTrips() {
+        let bytes = Data([0x00, 0x7f, 0xa5, 0xff])
+        #expect(bytes.hexString == "007fa5ff")
+        #expect(Data(hexString: "007FA5ff") == bytes)
+        #expect(Data(hexString: "abc") == nil)
+        #expect(Data(hexString: "zz") == nil)
     }
 
     // MARK: - SRP vector from srptools (the library pyatv uses)
@@ -124,10 +110,10 @@ struct CryptoTests {
     @Test func srpProofMatchesSrptoolsVector() throws {
         let configuration = SRPConfiguration<SHA512>(.N3072, padGeneratorForProof: false)
         let client = SRPClient(configuration: configuration)
-        let salt = Data(hexString: "0f1e2d3c4b5a69788796a5b4c3d2e1f0")!
+        let salt = try #require(Data(hexString: "0f1e2d3c4b5a69788796a5b4c3d2e1f0"))
         let privateA = Data(repeating: 0x2c, count: 32)
-        let publicA = Data(hexString: Vectors.a)!
-        let publicB = Data(hexString: Vectors.b)!
+        let publicA = try #require(Data(hexString: Vectors.a))
+        let publicB = try #require(Data(hexString: Vectors.b))
         let keys = SRPKeyPair(public: SRPKey([UInt8](publicA)), private: SRPKey([UInt8](privateA)))
 
         let shared = try client.calculateSharedSecret(
@@ -157,26 +143,26 @@ struct CryptoTests {
         let salt = Data(saltBytes)
         let serverKeys = srpServer.generateKeys(verifier: verifier)
         let accessorySigning = Curve25519.Signing.PrivateKey()
-        let accessoryID = Data("AA:BB:CC:DD:EE:FF".utf8)
+        let accessoryID = Data("02:00:00:00:00:01".utf8)
 
         let setup = HAPPairSetup(clientID: "client-1", name: "Test Mac")
 
         // M1
-        let m1 = HAPTLV.decode(setup.m1())
-        #expect(m1[HAPTag.method] == Data([0]))
-        #expect(m1[HAPTag.state] == Data([1]))
+        let m1 = try TLV8.decode(setup.m1())
+        #expect(m1[.method] == Data([0]))
+        #expect(m1[.state] == Data([1]))
 
         // M2 from the accessory.
-        let m2 = HAPTLV.encode([
-            (HAPTag.state, Data([2])),
-            (HAPTag.salt, salt),
-            (HAPTag.publicKey, Data(serverKeys.public.unpaddedBytes)),
+        let m2 = TLV8.encode([
+            (.state, Data([2])),
+            (.salt, salt),
+            (.publicKey, Data(serverKeys.public.unpaddedBytes)),
         ])
 
         // M3 from the client.
-        let m3 = HAPTLV.decode(try setup.m3(m2: m2, pin: "1234"))
-        let a = try #require(m3[HAPTag.publicKey])
-        let proof = try #require(m3[HAPTag.proof])
+        let m3 = try TLV8.decode(try setup.m3(m2: m2, pin: "1234"))
+        let a = try #require(m3[.publicKey])
+        let proof = try #require(m3[.proof])
         #expect(a.count == 384)
         #expect(proof.count == 64)
 
@@ -186,18 +172,18 @@ struct CryptoTests {
         let expected = HAPPairSetup.clientProof(configuration: configuration, salt: salt, a: a, b: Data(serverKeys.public.unpaddedBytes), k: k)
         #expect(expected == proof)
         let hamk = HAPPairSetup.serverProof(a: a, m1: proof, k: k)
-        let m4 = HAPTLV.encode([(HAPTag.state, Data([4])), (HAPTag.proof, hamk)])
+        let m4 = TLV8.encode([(.state, Data([4])), (.proof, hamk)])
 
         // M5 from the client. The accessory decrypts and verifies the signature.
-        let m5 = HAPTLV.decode(try setup.m5(m4: m4))
+        let m5 = try TLV8.decode(try setup.m5(m4: m4))
         let encryptKey = HAPKDF.derive(secret: k, salt: "Pair-Setup-Encrypt-Salt", info: "Pair-Setup-Encrypt-Info")
-        let m5Plain = try HAPCrypto.open(try #require(m5[HAPTag.encryptedData]), key: encryptKey, nonce: HAPCrypto.nonce("PS-Msg05"), aad: Data())
-        let m5Sub = HAPTLV.decode(m5Plain)
-        let clientID = try #require(m5Sub[HAPTag.identifier])
-        let clientLTPK = try #require(m5Sub[HAPTag.publicKey])
-        let clientSignature = try #require(m5Sub[HAPTag.signature])
+        let m5Plain = try HAPCrypto.open(try #require(m5[.encryptedData]), key: encryptKey, nonce: HAPCrypto.nonce("PS-Msg05"), aad: Data())
+        let m5Sub = try TLV8.decode(m5Plain)
+        let clientID = try #require(m5Sub[.identifier])
+        let clientLTPK = try #require(m5Sub[.publicKey])
+        let clientSignature = try #require(m5Sub[.signature])
         #expect(clientID == Data("client-1".utf8))
-        #expect(m5Sub[HAPTag.name] == HAPTLV.encodeNameDictionary("Test Mac"))
+        #expect(m5Sub[.name] == OPACK.encode(["name": "Test Mac"]))
         let controllerSalt = HAPKDF.derive(secret: k, salt: "Pair-Setup-Controller-Sign-Salt", info: "Pair-Setup-Controller-Sign-Info")
         let clientInfo = HAPKDF.bytes(of: controllerSalt) + clientID + clientLTPK
         let clientKey = try Curve25519.Signing.PublicKey(rawRepresentation: clientLTPK)
@@ -208,14 +194,14 @@ struct CryptoTests {
         let accessoryLTPK = accessorySigning.publicKey.rawRepresentation
         let accessoryInfo = HAPKDF.bytes(of: accessorySalt) + accessoryID + accessoryLTPK
         let accessorySignature = try accessorySigning.signature(for: accessoryInfo)
-        let m6Sub = HAPTLV.encode([
-            (HAPTag.identifier, accessoryID),
-            (HAPTag.publicKey, accessoryLTPK),
-            (HAPTag.signature, accessorySignature),
+        let m6Sub = TLV8.encode([
+            (.identifier, accessoryID),
+            (.publicKey, accessoryLTPK),
+            (.signature, accessorySignature),
         ])
-        let m6 = HAPTLV.encode([
-            (HAPTag.state, Data([6])),
-            (HAPTag.encryptedData, try HAPCrypto.seal(m6Sub, key: encryptKey, nonce: HAPCrypto.nonce("PS-Msg06"), aad: Data())),
+        let m6 = TLV8.encode([
+            (.state, Data([6])),
+            (.encryptedData, try HAPCrypto.seal(m6Sub, key: encryptKey, nonce: HAPCrypto.nonce("PS-Msg06"), aad: Data())),
         ])
 
         let credentials = try setup.finish(m6: m6)
@@ -235,13 +221,13 @@ struct CryptoTests {
         let serverKeys = srpServer.generateKeys(verifier: verifier)
         let setup = HAPPairSetup(clientID: "c", name: "n")
         _ = setup.m1()
-        let m2 = HAPTLV.encode([
-            (HAPTag.state, Data([2])),
-            (HAPTag.salt, Data(saltBytes)),
-            (HAPTag.publicKey, Data(serverKeys.public.unpaddedBytes)),
+        let m2 = TLV8.encode([
+            (.state, Data([2])),
+            (.salt, Data(saltBytes)),
+            (.publicKey, Data(serverKeys.public.unpaddedBytes)),
         ])
         _ = try setup.m3(m2: m2, pin: "1234")
-        let m4 = HAPTLV.encode([(HAPTag.state, Data([4])), (HAPTag.proof, Data(repeating: 1, count: 64))])
+        let m4 = TLV8.encode([(.state, Data([4])), (.proof, Data(repeating: 1, count: 64))])
         #expect(throws: HAPError.proofMismatch) {
             try setup.m5(m4: m4)
         }
@@ -250,9 +236,16 @@ struct CryptoTests {
     @Test func pairSetupReportsAccessoryError() {
         let setup = HAPPairSetup(clientID: "c", name: "n")
         _ = setup.m1()
-        let m2 = HAPTLV.encode([(HAPTag.state, Data([2])), (HAPTag.error, Data([2]))])
+        let m2 = TLV8.encode([(.state, Data([2])), (.error, Data([2]))])
         #expect(throws: HAPError.accessoryError(2)) {
             try setup.m3(m2: m2, pin: "0000")
+        }
+    }
+
+    @Test func pairSetupRejectsCallsOutOfOrder() {
+        let setup = HAPPairSetup(clientID: "c", name: "n")
+        #expect(throws: HAPError.wrongStep) {
+            try setup.m5(m4: TLV8.encode([(.state, Data([4]))]))
         }
     }
 
@@ -261,7 +254,7 @@ struct CryptoTests {
     @Test func pairVerifyFullLoop() throws {
         let accessorySigning = Curve25519.Signing.PrivateKey()
         let clientSigning = Curve25519.Signing.PrivateKey()
-        let accessoryID = Data("AA:BB".utf8)
+        let accessoryID = Data("02:00:00:00:00:01".utf8)
         let clientID = Data("client-uuid".utf8)
         let credentials = HAPCredentials(
             ltpk: accessorySigning.publicKey.rawRepresentation,
@@ -272,9 +265,9 @@ struct CryptoTests {
         let verify = HAPPairVerify(credentials: credentials)
 
         // M1
-        let m1 = HAPTLV.decode(verify.m1())
-        #expect(m1[HAPTag.state] == Data([1]))
-        let clientEphemeral = try #require(m1[HAPTag.publicKey])
+        let m1 = try TLV8.decode(verify.m1())
+        #expect(m1[.state] == Data([1]))
+        let clientEphemeral = try #require(m1[.publicKey])
         #expect(clientEphemeral.count == 32)
 
         // Accessory side of M2.
@@ -286,27 +279,27 @@ struct CryptoTests {
         let shared = agreement.withUnsafeBytes { Data($0) }
         let sessionKey = HAPKDF.derive(secret: shared, salt: "Pair-Verify-Encrypt-Salt", info: "Pair-Verify-Encrypt-Info")
         let accessoryInfo = accessoryEphemeral + accessoryID + clientEphemeral
-        let accessorySub = HAPTLV.encode([
-            (HAPTag.identifier, accessoryID),
-            (HAPTag.signature, try accessorySigning.signature(for: accessoryInfo)),
+        let accessorySub = TLV8.encode([
+            (.identifier, accessoryID),
+            (.signature, try accessorySigning.signature(for: accessoryInfo)),
         ])
-        let m2 = HAPTLV.encode([
-            (HAPTag.state, Data([2])),
-            (HAPTag.publicKey, accessoryEphemeral),
-            (HAPTag.encryptedData, try HAPCrypto.seal(accessorySub, key: sessionKey, nonce: HAPCrypto.nonce("PV-Msg02"), aad: Data())),
+        let m2 = TLV8.encode([
+            (.state, Data([2])),
+            (.publicKey, accessoryEphemeral),
+            (.encryptedData, try HAPCrypto.seal(accessorySub, key: sessionKey, nonce: HAPCrypto.nonce("PV-Msg02"), aad: Data())),
         ])
 
         // M3 from the client. The accessory verifies it.
-        let m3 = HAPTLV.decode(try verify.m3(m2: m2))
-        #expect(m3[HAPTag.state] == Data([3]))
-        let m3Plain = try HAPCrypto.open(try #require(m3[HAPTag.encryptedData]), key: sessionKey, nonce: HAPCrypto.nonce("PV-Msg03"), aad: Data())
-        let m3Sub = HAPTLV.decode(m3Plain)
-        #expect(m3Sub[HAPTag.identifier] == clientID)
+        let m3 = try TLV8.decode(try verify.m3(m2: m2))
+        #expect(m3[.state] == Data([3]))
+        let m3Plain = try HAPCrypto.open(try #require(m3[.encryptedData]), key: sessionKey, nonce: HAPCrypto.nonce("PV-Msg03"), aad: Data())
+        let m3Sub = try TLV8.decode(m3Plain)
+        #expect(m3Sub[.identifier] == clientID)
         let clientInfo = clientEphemeral + clientID + accessoryEphemeral
-        #expect(clientSigning.publicKey.isValidSignature(try #require(m3Sub[HAPTag.signature]), for: clientInfo))
+        #expect(clientSigning.publicKey.isValidSignature(try #require(m3Sub[.signature]), for: clientInfo))
 
         // M4
-        try verify.finish(m4: HAPTLV.encode([(HAPTag.state, Data([4]))]))
+        try verify.finish(m4: TLV8.encode([(.state, Data([4]))]))
 
         // Both sides derive the same channel keys.
         let keys = verify.sessionKeys(salt: "", outputInfo: "ClientEncrypt-main", inputInfo: "ServerEncrypt-main")
@@ -315,8 +308,8 @@ struct CryptoTests {
         #expect(HAPKDF.bytes(of: keys.out) == HAPKDF.bytes(of: accessoryIn))
         #expect(HAPKDF.bytes(of: keys.in) == HAPKDF.bytes(of: accessoryOut))
 
-        var client = ChaChaCounterCipher(outKey: keys.out, inKey: keys.in)
-        var accessory = ChaChaCounterCipher(outKey: accessoryOut, inKey: accessoryIn)
+        var client = ChaChaCounterCipher(outKey: keys.out, inKey: keys.in, layout: .counter12)
+        var accessory = ChaChaCounterCipher(outKey: accessoryOut, inKey: accessoryIn, layout: .counter12)
         let header = Data([0x08, 0, 0, 5])
         let sealed = try client.encrypt(Data("hello".utf8), aad: header)
         #expect(try accessory.decrypt(sealed, aad: header) == Data("hello".utf8))
@@ -332,19 +325,19 @@ struct CryptoTests {
             clientID: Data("c".utf8)
         )
         let verify = HAPPairVerify(credentials: credentials)
-        let clientEphemeral = try #require(HAPTLV.decode(verify.m1())[HAPTag.publicKey])
+        let clientEphemeral = try #require(try TLV8.decode(verify.m1())[.publicKey])
         let ephemeralKey = Curve25519.KeyAgreement.PrivateKey()
         let ephemeral = ephemeralKey.publicKey.rawRepresentation
         let shared = try ephemeralKey.sharedSecretFromKeyAgreement(with: Curve25519.KeyAgreement.PublicKey(rawRepresentation: clientEphemeral))
         let sessionKey = HAPKDF.derive(secret: shared.withUnsafeBytes { Data($0) }, salt: "Pair-Verify-Encrypt-Salt", info: "Pair-Verify-Encrypt-Info")
-        let sub = HAPTLV.encode([
-            (HAPTag.identifier, Data("id".utf8)),
-            (HAPTag.signature, try impostor.signature(for: ephemeral + Data("id".utf8) + clientEphemeral)),
+        let sub = TLV8.encode([
+            (.identifier, Data("id".utf8)),
+            (.signature, try impostor.signature(for: ephemeral + Data("id".utf8) + clientEphemeral)),
         ])
-        let m2 = HAPTLV.encode([
-            (HAPTag.state, Data([2])),
-            (HAPTag.publicKey, ephemeral),
-            (HAPTag.encryptedData, try HAPCrypto.seal(sub, key: sessionKey, nonce: HAPCrypto.nonce("PV-Msg02"), aad: Data())),
+        let m2 = TLV8.encode([
+            (.state, Data([2])),
+            (.publicKey, ephemeral),
+            (.encryptedData, try HAPCrypto.seal(sub, key: sessionKey, nonce: HAPCrypto.nonce("PV-Msg02"), aad: Data())),
         ])
         #expect(throws: HAPError.signatureInvalid) {
             try verify.m3(m2: m2)
@@ -353,11 +346,12 @@ struct CryptoTests {
 
     // MARK: - Credential store
 
-    @Test func credentialStoreRoundTrip() async throws {
+    @Test func credentialStoreRoundTrips() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("atv-store-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
         let store = CredentialStore(directory: directory)
         let creds = HAPCredentials(ltpk: Data([1]), ltsk: Data([2]), accessoryID: Data([3]), clientID: Data([4]))
-        try await store.save(StoredDevice(name: "Living Room", companion: creds, macAddress: "aa:bb"), for: "dev-1")
+        try await store.save(StoredDevice(name: "Living Room", companion: creds, macAddress: "02:00:00:00:00:01"), for: "dev-1")
 
         let fresh = CredentialStore(directory: directory)
         let loaded = try await fresh.device(for: "dev-1")
@@ -369,13 +363,18 @@ struct CryptoTests {
         #expect((attributes[.posixPermissions] as? Int) == 0o600)
 
         try await fresh.remove(for: "dev-1")
-        #expect(try await fresh.all().isEmpty)
+        #expect(try await fresh.device(for: "dev-1") == nil)
+    }
 
-        let id1 = CredentialStore.clientID(directory: directory)
-        let id2 = CredentialStore.clientID(directory: directory)
-        #expect(id1 == id2)
-        #expect(UUID(uuidString: id1) != nil)
-        try? FileManager.default.removeItem(at: directory)
+    @Test func clientIdentifierIsStablePerRole() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("atv-id-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let first = CredentialStore.clientID(directory: directory)
+        #expect(CredentialStore.clientID(directory: directory) == first)
+        #expect(UUID(uuidString: first) != nil)
+        let airplay = CredentialStore.clientID(role: "airplay", directory: directory)
+        #expect(airplay != first)
+        #expect(CredentialStore.clientID(role: "airplay", directory: directory) == airplay)
     }
 }
 

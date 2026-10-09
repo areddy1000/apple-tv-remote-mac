@@ -2,9 +2,9 @@ import CryptoKit
 import Foundation
 
 /// HKDF-SHA512 with string salt and info, as HAP uses it.
-public enum HAPKDF {
+enum HAPKDF {
     /// Derives a key of `length` bytes from `secret`.
-    public static func derive(secret: Data, salt: String, info: String, length: Int = 32) -> SymmetricKey {
+    static func derive(secret: Data, salt: String, info: String, length: Int = 32) -> SymmetricKey {
         HKDF<SHA512>.deriveKey(
             inputKeyMaterial: SymmetricKey(data: secret),
             salt: Data(salt.utf8),
@@ -14,7 +14,7 @@ public enum HAPKDF {
     }
 
     /// Returns the raw bytes of a symmetric key.
-    public static func bytes(of key: SymmetricKey) -> Data {
+    static func bytes(of key: SymmetricKey) -> Data {
         key.withUnsafeBytes { Data($0) }
     }
 }

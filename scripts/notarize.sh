@@ -14,7 +14,7 @@ DMG="$ROOT/dist/AppleTVRemote.dmg"
 
 "$ROOT/scripts/build-app.sh" release
 
-codesign --force --deep --options runtime --timestamp \
+codesign --force --options runtime --timestamp \
     --entitlements "$ROOT/Resources/Release.entitlements" \
     --sign "$IDENTITY" "$APP"
 codesign --verify --strict --verbose=2 "$APP"

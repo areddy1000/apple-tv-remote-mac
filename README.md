@@ -114,19 +114,21 @@ artwork and the title. Open the full window from the panel with the window butto
 ```sh
 .build/debug/atvctl discover
 .build/debug/atvctl press select
-.build/debug/atvctl press menu
+.build/debug/atvctl press menu --hold 500
 .build/debug/atvctl swipe down
 .build/debug/atvctl launch com.google.ios.youtube
 .build/debug/atvctl type "hello"
 .build/debug/atvctl apps
 .build/debug/atvctl state
 .build/debug/atvctl media pause
+.build/debug/atvctl volume 40
 .build/debug/atvctl now-playing --watch 60
 .build/debug/atvctl forget
 ```
 
-Add `--device "Living Room"` to pick one Apple TV by name. The Apple TV allows one session
-for each paired client, so quit the app before you use `atvctl`.
+Run `atvctl` with no arguments for the full list. Add `--device "Living Room"` to pick one
+Apple TV by name. The Apple TV allows one session for each paired client, so quit the app
+before you use `atvctl`.
 
 ### Scripting
 
@@ -135,7 +137,13 @@ The app answers URL commands. For example from a Shortcut or a terminal:
 ```sh
 open "atvremote://press/select"
 open "atvremote://launch/com.google.ios.youtube"
+open "atvremote://media/pause"
+open "atvremote://device/Living%20Room"
+open "atvremote://wake"
 ```
+
+Verbs: `press/<button>`, `launch/<bundle-id>`, `media/<play|pause|toggle|next|previous|skip-forward|skip-backward>`,
+`device/<name>`, `wake` and `sleep`.
 
 ## Credentials
 

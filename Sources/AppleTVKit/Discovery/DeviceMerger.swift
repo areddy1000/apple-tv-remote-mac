@@ -2,14 +2,14 @@ import Foundation
 import Network
 
 /// One Bonjour service result before the merge.
-public struct ServiceRecord: Sendable {
+struct ServiceRecord: Sendable {
     /// The Bonjour instance name.
-    public var name: String
+    var name: String
     /// The parsed TXT record.
-    public var txt: [String: String]
-    public var endpoint: NWEndpoint?
+    var txt: [String: String]
+    var endpoint: NWEndpoint?
 
-    public init(name: String, txt: [String: String], endpoint: NWEndpoint? = nil) {
+    init(name: String, txt: [String: String], endpoint: NWEndpoint? = nil) {
         self.name = name
         self.txt = txt
         self.endpoint = endpoint
@@ -19,8 +19,8 @@ public struct ServiceRecord: Sendable {
 /// Joins Companion and AirPlay results into one device list.
 /// The join key is AirPlay `psi` equal to Companion `rpMRtID`.
 /// The fallback join key is the instance name.
-public enum DeviceMerger {
-    public static func merge(
+enum DeviceMerger {
+    static func merge(
         companion: [String: ServiceRecord],
         airplay: [String: ServiceRecord]
     ) -> [DiscoveredDevice] {

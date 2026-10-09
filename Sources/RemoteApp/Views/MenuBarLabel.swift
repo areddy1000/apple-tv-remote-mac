@@ -16,8 +16,10 @@ struct MenuBarLabel: View {
                 }
                 Text(truncated(info.title))
             }
+            .accessibilityLabel("Apple TV Remote, now playing \(info.title)")
         } else {
             Image(systemName: "appletv")
+                .accessibilityLabel("Apple TV Remote")
         }
     }
 

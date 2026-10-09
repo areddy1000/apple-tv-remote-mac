@@ -33,7 +33,6 @@ enum Tokens {
     static let buttonSize: CGFloat = 54
     static let buttonSizeCompact: CGFloat = 46
     static let buttonSpacing: CGFloat = 14
-    static let cornerRadius: CGFloat = 22
     static let touchCornerRadius: CGFloat = 28
     static let inset: CGFloat = 20
 
@@ -46,11 +45,4 @@ enum Tokens {
     static let time = Font.system(size: 12, weight: .regular, design: .default).monospacedDigit()
     static let symbol = Font.system(size: 18, weight: .medium)
     static let symbolSmall = Font.system(size: 15, weight: .medium)
-}
-
-/// Environment flags that change motion and materials.
-struct AccessibilityFlags {
-    var reduceMotion: Bool
-    var reduceTransparency: Bool
-    var increaseContrast: Bool
 }

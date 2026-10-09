@@ -1,15 +1,14 @@
 import CryptoKit
 import Foundation
 
-/// ChaCha20-Poly1305 stream with one counter per direction.
-/// The nonce is 4 zero bytes followed by the 8 byte little-endian counter.
-/// Companion frames and the AirPlay data stream use this layout.
+/// ChaCha20-Poly1305 stream with one message counter per direction.
+/// The counter forms the nonce. `NonceLayout` picks where it sits.
 public struct ChaChaCounterCipher: Sendable {
     /// Where the counter sits inside the 12 byte nonce.
     public enum NonceLayout: Sendable {
         /// The counter fills all 12 bytes little-endian. Companion Link uses this.
         case counter12
-        /// 4 zero bytes then the 8 byte little-endian counter. Raw MRP uses this.
+        /// 4 zero bytes then the 8 byte little-endian counter. The AirPlay channels use this.
         case zeroPrefixed8
     }
 
@@ -19,7 +18,7 @@ public struct ChaChaCounterCipher: Sendable {
     private var outCounter: UInt64 = 0
     private var inCounter: UInt64 = 0
 
-    public init(outKey: SymmetricKey, inKey: SymmetricKey, layout: NonceLayout = .zeroPrefixed8) {
+    public init(outKey: SymmetricKey, inKey: SymmetricKey, layout: NonceLayout) {
         self.outKey = outKey
         self.inKey = inKey
         self.layout = layout
@@ -40,17 +39,13 @@ public struct ChaChaCounterCipher: Sendable {
         return plaintext
     }
 
-    static func nonce(for counter: UInt64, layout: NonceLayout = .zeroPrefixed8) -> ChaChaPoly.Nonce {
-        var little = counter.littleEndian
-        var bytes = Data()
-        switch layout {
-        case .zeroPrefixed8:
-            bytes = Data(repeating: 0, count: 4)
-            withUnsafeBytes(of: &little) { bytes.append(contentsOf: $0) }
-        case .counter12:
-            withUnsafeBytes(of: &little) { bytes.append(contentsOf: $0) }
-            bytes.append(Data(repeating: 0, count: 4))
-        }
+    static func nonce(for counter: UInt64, layout: NonceLayout) -> ChaChaPoly.Nonce {
+        var bytes = Data(capacity: 12)
+        let zeros = Data(repeating: 0, count: 4)
+        if layout == .zeroPrefixed8 { bytes.append(zeros) }
+        bytes.append(littleEndian: counter, width: 8)
+        if layout == .counter12 { bytes.append(zeros) }
+        // The buffer is 12 bytes in both layouts, so the nonce init cannot fail.
         return try! ChaChaPoly.Nonce(data: bytes)
     }
 }
@@ -59,11 +54,12 @@ public struct ChaChaCounterCipher: Sendable {
 /// Each frame is a 2 byte little-endian plaintext length, the ciphertext, and the 16 byte tag.
 /// The length bytes are the AAD. A frame holds at most 1024 plaintext bytes.
 public struct HAPFramedCipher: Sendable {
-    public static let maxFrame = 1024
+    static let maxFrame = 1024
+    private static let tagLength = 16
     private var cipher: ChaChaCounterCipher
 
     public init(outKey: SymmetricKey, inKey: SymmetricKey) {
-        cipher = ChaChaCounterCipher(outKey: outKey, inKey: inKey)
+        cipher = ChaChaCounterCipher(outKey: outKey, inKey: inKey, layout: .zeroPrefixed8)
     }
 
     /// Seals data into one or more frames.
@@ -73,10 +69,8 @@ public struct HAPFramedCipher: Sendable {
         repeat {
             let end = min(offset + Self.maxFrame, plaintext.endIndex)
             let block = plaintext.subdata(in: offset..<end)
-            var header = Data(count: 2)
-            let length = UInt16(block.count).littleEndian
-            header[0] = UInt8(length & 0xFF)
-            header[1] = UInt8(length >> 8)
+            var header = Data(capacity: 2)
+            header.append(littleEndian: UInt64(block.count), width: 2)
             out.append(header)
             out.append(try cipher.encrypt(block, aad: header))
             offset = end
@@ -91,7 +85,7 @@ public struct HAPFramedCipher: Sendable {
         var index = buffer.startIndex
         while index + 2 <= buffer.endIndex {
             let length = Int(buffer[index]) | Int(buffer[index + 1]) << 8
-            let frameEnd = index + 2 + length + 16
+            let frameEnd = index + 2 + length + Self.tagLength
             guard frameEnd <= buffer.endIndex else { break }
             let header = buffer.subdata(in: index..<(index + 2))
             let body = buffer.subdata(in: (index + 2)..<frameEnd)

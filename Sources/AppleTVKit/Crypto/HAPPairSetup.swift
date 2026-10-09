@@ -25,8 +25,8 @@ public final class HAPPairSetup {
     private var signingKey: Curve25519.Signing.PrivateKey?
 
     /// - Parameters:
-    ///   - clientID: Our pairing identifier. The same value serves Companion and AirPlay.
-    ///   - name: The name the Apple TV shows for this controller.
+    ///   - clientID: Our pairing identifier. The accessory keeps one pairing per identifier.
+    ///   - name: The name the accessory shows for this controller.
     public init(clientID: String, name: String) {
         self.clientID = clientID
         self.name = name
@@ -35,16 +35,16 @@ public final class HAPPairSetup {
     /// Builds M1: method 0 and state 1.
     public func m1() -> Data {
         step = .sentM1
-        return HAPTLV.encode([(HAPTag.method, Data([0])), (HAPTag.state, Data([1]))])
+        return TLV8.encode([(.method, Data([0])), (.state, Data([1]))])
     }
 
     /// Consumes M2 and builds M3 with the client public key and proof.
     public func m3(m2: Data, pin: String) throws -> Data {
         guard step == .sentM1 else { throw HAPError.wrongStep }
-        let tlv = HAPTLV.decode(m2)
+        let tlv = try TLV8.decode(m2)
         try HAPCrypto.checkState(tlv, expected: 2)
-        let salt = try HAPCrypto.field(tlv, HAPTag.salt)
-        let serverPublic = try HAPCrypto.field(tlv, HAPTag.publicKey)
+        let salt = try HAPCrypto.field(tlv, .salt)
+        let serverPublic = try HAPCrypto.field(tlv, .publicKey)
 
         let client = SRPClient(configuration: configuration)
         var keys = client.generateKeys()
@@ -62,6 +62,7 @@ public final class HAPPairSetup {
                 serverPublicKey: serverKey
             )
         } catch {
+            // swift-srp rejects a server key that is zero modulo N.
             throw HAPError.invalidKey
         }
 
@@ -74,19 +75,19 @@ public final class HAPPairSetup {
         clientProof = proof
         sessionKey = k
         step = .sentM3
-        return HAPTLV.encode([
-            (HAPTag.state, Data([3])),
-            (HAPTag.publicKey, a),
-            (HAPTag.proof, proof),
+        return TLV8.encode([
+            (.state, Data([3])),
+            (.publicKey, a),
+            (.proof, proof),
         ])
     }
 
     /// Consumes M4, checks the server proof, and builds the encrypted M5.
     public func m5(m4: Data) throws -> Data {
         guard step == .sentM3 else { throw HAPError.wrongStep }
-        let tlv = HAPTLV.decode(m4)
+        let tlv = try TLV8.decode(m4)
         try HAPCrypto.checkState(tlv, expected: 4)
-        let serverProof = try HAPCrypto.field(tlv, HAPTag.proof)
+        let serverProof = try HAPCrypto.field(tlv, .proof)
         let expected = Self.serverProof(a: clientPublic, m1: clientProof, k: sessionKey)
         guard Self.constantTimeEqual(serverProof, expected) else { throw HAPError.proofMismatch }
 
@@ -99,32 +100,32 @@ public final class HAPPairSetup {
         let deviceInfo = HAPKDF.bytes(of: signSalt) + clientIDData + ltpk
         let signature = try key.signature(for: deviceInfo)
 
-        let sub = HAPTLV.encode([
-            (HAPTag.identifier, clientIDData),
-            (HAPTag.publicKey, ltpk),
-            (HAPTag.signature, signature),
-            (HAPTag.name, HAPTLV.encodeNameDictionary(name)),
+        let sub = TLV8.encode([
+            (.identifier, clientIDData),
+            (.publicKey, ltpk),
+            (.signature, signature),
+            (.name, OPACK.encode(.dictionary(["name": .string(name)]))),
         ])
         let encrypted = try HAPCrypto.seal(sub, key: encryptKey, nonce: HAPCrypto.nonce("PS-Msg05"), aad: Data())
         step = .sentM5
-        return HAPTLV.encode([
-            (HAPTag.state, Data([5])),
-            (HAPTag.encryptedData, encrypted),
+        return TLV8.encode([
+            (.state, Data([5])),
+            (.encryptedData, encrypted),
         ])
     }
 
     /// Consumes M6, verifies the accessory signature, and returns the credentials.
     public func finish(m6: Data) throws -> HAPCredentials {
         guard step == .sentM5, let key = signingKey else { throw HAPError.wrongStep }
-        let tlv = HAPTLV.decode(m6)
+        let tlv = try TLV8.decode(m6)
         try HAPCrypto.checkState(tlv, expected: 6)
-        let encrypted = try HAPCrypto.field(tlv, HAPTag.encryptedData)
+        let encrypted = try HAPCrypto.field(tlv, .encryptedData)
         let encryptKey = HAPKDF.derive(secret: sessionKey, salt: "Pair-Setup-Encrypt-Salt", info: "Pair-Setup-Encrypt-Info")
         let plain = try HAPCrypto.open(encrypted, key: encryptKey, nonce: HAPCrypto.nonce("PS-Msg06"), aad: Data())
-        let sub = HAPTLV.decode(plain)
-        let accessoryID = try HAPCrypto.field(sub, HAPTag.identifier)
-        let accessoryLTPK = try HAPCrypto.field(sub, HAPTag.publicKey)
-        let signature = try HAPCrypto.field(sub, HAPTag.signature)
+        let sub = try TLV8.decode(plain)
+        let accessoryID = try HAPCrypto.field(sub, .identifier)
+        let accessoryLTPK = try HAPCrypto.field(sub, .publicKey)
+        let signature = try HAPCrypto.field(sub, .signature)
 
         let accessorySalt = HAPKDF.derive(secret: sessionKey, salt: "Pair-Setup-Accessory-Sign-Salt", info: "Pair-Setup-Accessory-Sign-Info")
         let accessoryInfo = HAPKDF.bytes(of: accessorySalt) + accessoryID + accessoryLTPK
@@ -138,9 +139,11 @@ public final class HAPPairSetup {
             ltpk: accessoryLTPK,
             ltsk: key.rawRepresentation,
             accessoryID: accessoryID,
-            clientID: Data(clientID.utf8)
+            clientID: clientIDData
         )
     }
+
+    private var clientIDData: Data { Data(clientID.utf8) }
 
     // MARK: - SRP proofs
 
@@ -161,6 +164,7 @@ public final class HAPPairSetup {
         Data(SHA512.hash(data: a + m1 + k))
     }
 
+    /// Compares two buffers in a time that depends on the length only.
     static func constantTimeEqual(_ lhs: Data, _ rhs: Data) -> Bool {
         guard lhs.count == rhs.count else { return false }
         var diff: UInt8 = 0

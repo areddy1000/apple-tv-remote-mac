@@ -60,10 +60,12 @@ struct PINField: View {
                         .animation(Motion.hover, value: code.count)
                 }
             }
-            TextField("", text: $code)
+            // The real field. It stays nearly invisible so the boxes above show the digits.
+            TextField("PIN", text: $code)
                 .textFieldStyle(.plain)
                 .font(.system(size: 1))
                 .opacity(0.02)
+                .accessibilityLabel("Four digit PIN")
                 .onChange(of: code) { _, new in
                     let digits = new.filter(\.isNumber)
                     if digits != new || digits.count > 4 { code = String(digits.prefix(4)) }

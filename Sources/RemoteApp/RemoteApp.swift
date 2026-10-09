@@ -4,6 +4,9 @@ import SwiftUI
 
 @main
 struct RemoteApp: App {
+    static let mainWindowID = "main"
+    static let windowTitle = "Apple TV Remote"
+
     @State private var store: DeviceStore
     @State private var coordinator: AppCoordinator
     @State private var keyMonitor: KeyMonitor
@@ -17,16 +20,18 @@ struct RemoteApp: App {
     }
 
     /// Brings the remote window to the front from any app.
-    private func summon() {
+    @MainActor
+    static func summon() {
         NSApp.activate(ignoringOtherApps: true)
         // A closed SwiftUI window stays in the list as hidden. Ordering it front reopens it.
-        if let window = NSApp.windows.first(where: { $0.identifier?.rawValue.hasPrefix("main") == true || $0.title == "Apple TV Remote" }) {
-            window.makeKeyAndOrderFront(nil)
+        let window = NSApp.windows.first {
+            $0.identifier?.rawValue.hasPrefix(mainWindowID) == true || $0.title == windowTitle
         }
+        window?.makeKeyAndOrderFront(nil)
     }
 
     var body: some Scene {
-        Window("Apple TV Remote", id: "main") {
+        Window(Self.windowTitle, id: Self.mainWindowID) {
             RemoteWindow()
                 .environment(store)
                 .environment(coordinator)
@@ -34,7 +39,7 @@ struct RemoteApp: App {
                 .onAppear {
                     keyMonitor.start()
                     coordinator.start()
-                    if hotKey == nil { hotKey = HotKey { summon() } }
+                    if hotKey == nil { hotKey = HotKey { Self.summon() } }
                 }
                 .onOpenURL { url in coordinator.handle(url) }
         }
@@ -79,7 +84,8 @@ struct RemoteCommands: Commands {
             Button("Wake") { coordinator.wakeSelected() }
             Button("Screensaver") { store.click(.screensaver) }
             Divider()
-            Text("Summon from anywhere: ⌃⌥R")
+            // The system-wide hotkey is Control-Option-R. Menus cannot show a Carbon hotkey.
+            Button("Show Remote") { RemoteApp.summon() }
         }
     }
 }

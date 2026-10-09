@@ -15,6 +15,8 @@ final class AppCoordinator {
     private var pinContinuation: CheckedContinuation<String?, Never>?
     private var controllers: [String: AppleTVDevice] = [:]
 
+    private static let lastDeviceKey = "atv.lastDevice"
+
     init(store: DeviceStore) {
         self.store = store
         self.identity = CompanionIdentity.thisMac(clientID: CredentialStore.clientID())
@@ -22,16 +24,17 @@ final class AppCoordinator {
 
     func start() {
         if ProcessInfo.processInfo.environment["ATV_MOCK"] == "1" {
-            attachMock()
+            store.attach(MockController(), name: "Mock Apple TV")
             return
         }
-        try? credentialsLoad()
+        Task { try? await credentials.load() }
         browseTask = Task { [weak self] in
             guard let self else { return }
             await self.browser.start()
             for await devices in self.browser.devices {
                 self.store.devices = devices
                 self.autoSelect()
+                // Endpoints can arrive after the first sighting. Pass the fresh record on.
                 for device in devices {
                     if let controller = self.controllers[device.id] {
                         Task { await controller.update(device: device) }
@@ -41,19 +44,10 @@ final class AppCoordinator {
         }
     }
 
-    private func credentialsLoad() throws {
-        Task { try? await credentials.load() }
-    }
-
-    func attachMock() {
-        let mock = MockController()
-        store.attach(mock, name: "Living Room (Mock)", model: "Apple TV 4K")
-    }
-
-    /// Picks the last used device, else the first paired one, else the first found.
+    /// Picks the last used device, else the first found.
     private func autoSelect() {
         guard store.selectedDeviceID == nil, !store.devices.isEmpty else { return }
-        let lastUsed = UserDefaults.standard.string(forKey: "atv.lastDevice")
+        let lastUsed = UserDefaults.standard.string(forKey: Self.lastDeviceKey)
         if let device = store.devices.first(where: { $0.id == lastUsed }) ?? store.devices.first {
             select(device)
         }
@@ -62,7 +56,7 @@ final class AppCoordinator {
     func select(_ device: DiscoveredDevice) {
         guard device.id != store.selectedDeviceID || store.controller == nil else { return }
         ATVLog.companion.info("selected \(device.name, privacy: .public)")
-        UserDefaults.standard.set(device.id, forKey: "atv.lastDevice")
+        UserDefaults.standard.set(device.id, forKey: Self.lastDeviceKey)
         let controller = controllers[device.id] ?? AppleTVDevice(
             device: device,
             identity: identity,
@@ -73,9 +67,10 @@ final class AppCoordinator {
             }
         )
         controllers[device.id] = controller
-        store.attach(controller, name: device.name, model: device.modelDisplayName)
+        store.attach(controller, name: device.name)
     }
 
+    /// Removes the stored pairing for the selected TV and connects again, which asks for a PIN.
     func forgetSelected() {
         guard let id = store.selectedDeviceID, let controller = controllers[id] else { return }
         Task {

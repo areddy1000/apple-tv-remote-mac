@@ -12,27 +12,28 @@ public enum CompanionError: Error, Sendable, Equatable {
     case textInputInactive
 }
 
-/// Identity the Mac presents to the Apple TV.
+/// The identity the Mac presents to the Apple TV.
 public struct CompanionIdentity: Sendable {
+    /// The HAP pairing identifier for the Companion link.
     public var clientID: String
+    /// The HAP pairing identifier for the AirPlay link. The TV keeps one pairing per
+    /// identifier, so the two links must not share one.
+    public var airplayClientID: String
     public var name: String
     public var model: String
-    /// 12 hex characters. Also sent as a colon-separated address.
+    /// 12 hex characters. A random, persisted, locally administered address.
     public var deviceID: String
 
-    public init(clientID: String, name: String, model: String, deviceID: String) {
+    public init(clientID: String, airplayClientID: String, name: String, model: String, deviceID: String) {
         self.clientID = clientID
+        self.airplayClientID = airplayClientID
         self.name = name
         self.model = model
         self.deviceID = deviceID
     }
 
-    /// The identifier for the AirPlay pairing. A separate UUID from the Companion one.
-    public var airplayClientID: String {
-        CredentialStore.clientID(role: "airplay")
-    }
-
-    var colonAddress: String {
+    /// `deviceID` as a colon-separated address, for example `7A:D2:6A:01:5A:46`.
+    public var deviceAddress: String {
         stride(from: 0, to: deviceID.count, by: 2).map { offset -> String in
             let start = deviceID.index(deviceID.startIndex, offsetBy: offset)
             let end = deviceID.index(start, offsetBy: 2, limitedBy: deviceID.endIndex) ?? deviceID.endIndex
@@ -46,24 +47,39 @@ public enum CompanionEvent: Sendable {
     case textInputStarted(current: String)
     case textInputStopped
     case attention(PowerState)
+    /// The media control flags for the current output. See `CompanionSession.volumeFlag`.
     case mediaFlags(Int64)
-    case unknown(id: String, content: OPACKValue?)
+}
+
+/// Commands for the Companion `_mcc` request.
+public enum MediaControlCode: Int64, Sendable {
+    case play = 1
+    case pause = 2
+    case nextTrack = 3
+    case previousTrack = 4
+    case getVolume = 5
+    case setVolume = 6
+    case skipBy = 7
 }
 
 /// One paired and verified Companion Link session.
 /// Every request carries an `_x` id and waits for the matching response.
 public actor CompanionSession {
+    /// The bit in the media control flags that means the output has a volume level.
+    public static let volumeFlag: Int64 = 0x100
+
     public let identity: CompanionIdentity
+    public nonisolated let events: AsyncStream<CompanionEvent>
+
     private let connection: CompanionConnection
+    private let eventsContinuation: AsyncStream<CompanionEvent>.Continuation
     private var nextXID: Int64 = 1
     private var pending: [Int64: CheckedContinuation<OPACKValue, Error>] = [:]
+    private var rawWaiters: [CheckedContinuation<CompanionFrame, Error>] = []
     private var reader: Task<Void, Never>?
-    private var sessionID: Int64 = 0
+    private var isVerified = false
     private var textSessionUUID: Data?
-    private var touchStarted = false
-    public nonisolated let events: AsyncStream<CompanionEvent>
-    private let eventsContinuation: AsyncStream<CompanionEvent>.Continuation
-    private(set) public var isVerified = false
+    private var mediaFlags: Int64 = 0
 
     public init(endpoint: NWEndpoint, identity: CompanionIdentity) {
         self.identity = identity
@@ -75,22 +91,9 @@ public actor CompanionSession {
 
     // MARK: Lifecycle
 
+    /// Opens the socket and starts the frame reader.
     public func open() async throws {
         try await connection.open()
-        startReader()
-    }
-
-    public func close() async {
-        reader?.cancel()
-        await connection.close()
-        for (_, continuation) in pending {
-            continuation.resume(throwing: CompanionError.notConnected)
-        }
-        pending.removeAll()
-        eventsContinuation.finish()
-    }
-
-    private func startReader() {
         reader = Task { [weak self] in
             guard let self else { return }
             for await frame in connection.frames {
@@ -100,18 +103,28 @@ public actor CompanionSession {
         }
     }
 
+    /// Closes the socket. Pending requests fail and the event stream ends.
+    public func close() async {
+        reader?.cancel()
+        reader = nil
+        await connection.close()
+        linkDropped()
+    }
+
     private func linkDropped() {
         isVerified = false
         for (_, continuation) in pending {
             continuation.resume(throwing: CompanionError.notConnected)
         }
         pending.removeAll()
+        for waiter in rawWaiters {
+            waiter.resume(throwing: CompanionError.notConnected)
+        }
+        rawWaiters.removeAll()
         eventsContinuation.finish()
     }
 
-    // MARK: Raw frames during pairing
-
-    private var rawWaiters: [CheckedContinuation<CompanionFrame, Error>] = []
+    // MARK: Inbound frames
 
     private func nextRawFrame() async throws -> CompanionFrame {
         try await withCheckedThrowingContinuation { continuation in
@@ -120,12 +133,9 @@ public actor CompanionSession {
     }
 
     private func dispatch(_ frame: CompanionFrame) {
-        if frame.type.isAuth || !isVerified {
-            if !rawWaiters.isEmpty {
-                let waiter = rawWaiters.removeFirst()
-                waiter.resume(returning: frame)
-                return
-            }
+        if frame.type.isAuth || !isVerified, !rawWaiters.isEmpty {
+            rawWaiters.removeFirst().resume(returning: frame)
+            return
         }
         guard frame.type == .eOPACK || frame.type == .uOPACK else {
             if frame.type != .noOp {
@@ -147,12 +157,13 @@ public actor CompanionSession {
             }
             return
         }
+        let id = value["_i"]?.stringValue ?? ""
         if type == 2, let xid = value["_x"]?.intValue {
             // The TV asked us something. Answer, then treat it as an event too.
-            Task { await self.reply(to: value["_i"]?.stringValue ?? "", xid: xid) }
+            Task { await self.reply(to: id, xid: xid) }
         }
         if type == 1 || type == 2 {
-            handleEvent(id: value["_i"]?.stringValue ?? "", content: value["_c"], xid: value["_x"]?.intValue)
+            handleEvent(id: id, content: value["_c"])
         }
     }
 
@@ -175,7 +186,7 @@ public actor CompanionSession {
             "_clFl": .int(128),
             "_i": .string(identity.deviceID.lowercased()),
             "_idsID": .string(identity.clientID),
-            "_pubID": .string(identity.colonAddress),
+            "_pubID": .string(identity.deviceAddress),
             "_sf": .int(256),
             "_sv": .string("170.18"),
             "model": .string(identity.model),
@@ -183,7 +194,7 @@ public actor CompanionSession {
         ])
     }
 
-    private func handleEvent(id: String, content: OPACKValue?, xid: Int64?) {
+    private func handleEvent(id: String, content: OPACKValue?) {
         switch id {
         case "_tiStarted":
             let data = content?["_tiD"]?.dataValue
@@ -202,26 +213,16 @@ public actor CompanionSession {
                 eventsContinuation.yield(.attention(power))
             }
         default:
-            ATVLog.companion.debug("event \(id, privacy: .public)")
-            eventsContinuation.yield(.unknown(id: id, content: content))
+            ATVLog.companion.debug("unhandled event \(id, privacy: .public)")
         }
     }
 
-    // MARK: Requests
+    // MARK: Outbound messages
 
     /// Sends a request and waits for the response content.
     @discardableResult
     public func request(_ id: String, content: OPACKValue = .dictionary([:]), timeout: Duration = .seconds(8)) async throws -> OPACKValue {
-        let xid = nextXID
-        nextXID += 1
-        let message: OPACKValue = .dictionary([
-            "_i": .string(id),
-            "_t": .int(2),
-            "_x": .int(xid),
-            "_c": content,
-        ])
-        let frame = CompanionFrame(type: .eOPACK, payload: OPACK.encode(message))
-        try await connection.send(frame)
+        let xid = try await send(id, type: 2, content: content)
         return try await withCheckedThrowingContinuation { continuation in
             pending[xid] = continuation
             Task { [weak self] in
@@ -237,18 +238,19 @@ public actor CompanionSession {
         continuation.resume(throwing: CompanionError.timeout)
     }
 
-    /// Sends an event with no response.
+    /// Sends an event. The TV never answers an event.
     public func event(_ id: String, content: OPACKValue = .dictionary([:])) async throws {
-        try await fire(id, type: 1, content: content)
+        _ = try await send(id, type: 1, content: content)
     }
 
     /// Sends a request and does not wait for the reply. The reply is dropped on arrival.
-    /// Buttons use this. The TV acts on requests, but a wait would add latency.
+    /// Buttons use this. The TV acts on requests only, but a wait would add latency.
     public func fireRequest(_ id: String, content: OPACKValue = .dictionary([:])) async throws {
-        try await fire(id, type: 2, content: content)
+        _ = try await send(id, type: 2, content: content)
     }
 
-    private func fire(_ id: String, type: Int64, content: OPACKValue) async throws {
+    /// Writes one OPACK message and returns its `_x` id.
+    private func send(_ id: String, type: Int64, content: OPACKValue) async throws -> Int64 {
         let xid = nextXID
         nextXID += 1
         let message: OPACKValue = .dictionary([
@@ -258,6 +260,7 @@ public actor CompanionSession {
             "_c": content,
         ])
         try await connection.send(CompanionFrame(type: .eOPACK, payload: OPACK.encode(message)))
+        return xid
     }
 
     // MARK: Pairing
@@ -313,20 +316,20 @@ public actor CompanionSession {
 
     /// Sends system info and starts the remote service session.
     public func startSession() async throws {
-        _ = try await request("_systemInfo", content: systemInfo())
-
-        let localSID = Int64.random(in: 1...Int64(UInt32.max))
-        let response = try await request("_sessionStart", content: .dictionary([
+        try await request("_systemInfo", content: systemInfo())
+        try await request("_sessionStart", content: .dictionary([
             "_srvT": .string("com.apple.tvremoteservices"),
-            "_sid": .int(localSID),
+            "_sid": .int(Int64.random(in: 1...Int64(UInt32.max))),
         ]))
-        let remoteSID = response["_sid"]?.intValue ?? 0
-        sessionID = (remoteSID << 32) | localSID
         // The remote control service answers queries only after this registration.
-        _ = try await request("TVRCSessionStart", content: .dictionary(["ProtocolVersionKey": .string("1.2")]))
+        try await request("TVRCSessionStart", content: .dictionary(["ProtocolVersionKey": .string("1.2")]))
         ATVLog.companion.info("session started")
-        try await startTouch()
-        try await subscribeInterest()
+        _ = try? await request("_touchStart", content: .dictionary([
+            "_width": .double(1000),
+            "_height": .double(1000),
+            "_tFl": .int(0),
+        ]))
+        try? await event("_interest", content: .dictionary(["_regEvents": .array([.string("_iMC")])]))
         await probeTextInput()
     }
 
@@ -337,20 +340,6 @@ public actor CompanionSession {
             textSessionUUID = uuid
             eventsContinuation.yield(.textInputStarted(current: RTISession.currentText(from: data) ?? ""))
         }
-    }
-
-    private func startTouch() async throws {
-        guard !touchStarted else { return }
-        _ = try? await request("_touchStart", content: .dictionary([
-            "_width": .double(1000),
-            "_height": .double(1000),
-            "_tFl": .int(0),
-        ]))
-        touchStarted = true
-    }
-
-    private func subscribeInterest() async throws {
-        try? await event("_interest", content: .dictionary(["_regEvents": .array([.string("_iMC")])]))
     }
 
     // MARK: Commands
@@ -365,15 +354,15 @@ public actor CompanionSession {
                 "_hidC": .int(Int64(button.rawValue)),
             ]))
         } catch {
-            ATVLog.companion.error("hid send failed: \(error)")
+            ATVLog.companion.error("hid send failed: \(String(describing: error), privacy: .public)")
         }
     }
 
     /// One touch sample. Timestamps use the uptime clock in nanoseconds.
     public func touch(_ touch: TouchEvent) async {
-        let ns = Int64(ProcessInfo.processInfo.systemUptime * 1_000_000_000)
+        let nanoseconds = Int64(ProcessInfo.processInfo.systemUptime * 1_000_000_000)
         try? await event("_hidT", content: .dictionary([
-            "_ns": .int(ns),
+            "_ns": .int(nanoseconds),
             "_tFg": .int(1),
             "_cx": .double(touch.x),
             "_cy": .double(touch.y),
@@ -382,84 +371,70 @@ public actor CompanionSession {
     }
 
     public func launch(bundleID: String) async throws {
-        _ = try await request("_launchApp", content: .dictionary(["_bundleID": .string(bundleID)]))
+        try await request("_launchApp", content: .dictionary(["_bundleID": .string(bundleID)]))
     }
 
     public func launchableApps() async throws -> [LaunchableApp] {
         let response = try await request("FetchLaunchableApplicationsEvent")
         guard let dict = response.dictValue else { return [] }
         return dict.compactMap { key, value in
-            guard let name = value.stringValue else { return nil }
-            return LaunchableApp(bundleID: key, name: name)
+            value.stringValue.map { LaunchableApp(bundleID: key, name: $0) }
         }
         .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
     public func attentionState() async throws -> PowerState {
-        // tvOS 26 does not always answer this. Keep the timeout short.
+        // tvOS does not always answer this. Keep the timeout short.
         let response = try await request("FetchAttentionState", timeout: .seconds(3))
-        let raw = response["state"]?.intValue ?? response.intValue ?? 0
-        return PowerState(rawValue: Int(raw)) ?? .unknown
+        return response["state"]?.intValue.flatMap { PowerState(rawValue: Int($0)) } ?? .unknown
     }
 
-    /// Media control through the Companion `_mcc` command.
+    /// Media control through the Companion `_mcc` request.
     @discardableResult
-    public func mediaControl(_ command: Int64, arguments: [String: OPACKValue] = [:]) async throws -> OPACKValue {
+    public func mediaControl(_ command: MediaControlCode, arguments: [String: OPACKValue] = [:]) async throws -> OPACKValue {
         var content = arguments
-        content["_mcc"] = .int(command)
+        content["_mcc"] = .int(command.rawValue)
         return try await request("_mcc", content: .dictionary(content))
     }
 
-    /// The media control flags the TV last reported. Bit 0x100 means volume control.
-    private(set) public var mediaFlags: Int64 = 0
-
-    /// The volume as 0...1. Nil when the current output has no volume control.
+    /// The volume as 0...1. Nil when the current output has no volume level.
     public func volumeLevel() async throws -> Double? {
-        ATVLog.companion.debug("volume query, flags \(self.mediaFlags)")
-        guard mediaFlags & 0x100 != 0 else { return nil }
-        let response = try await mediaControl(5, arguments: [:])
-        ATVLog.companion.debug("volume reply \(String(describing: response), privacy: .public)")
+        guard mediaFlags & Self.volumeFlag != 0 else { return nil }
+        let response = try await mediaControl(.getVolume)
         return response["_vol"]?.doubleValue
     }
 
     public func setVolume(_ level: Double) async throws {
-        let clamped = min(1, max(0, level))
-        try await mediaControl(6, arguments: ["_vol": .double(clamped)])
+        try await mediaControl(.setVolume, arguments: ["_vol": .double(min(1, max(0, level)))])
     }
 
     // MARK: Text input
 
-    /// Opens a text input session and returns the current field text when known.
-    public func beginTextInput() async throws {
-        // pyatv stops any old session first. The TV then returns a fresh session id.
+    /// Opens a text input session. Throws when no field is active on the TV.
+    private func beginTextInput() async throws {
+        // Stop any old session first, as pyatv does. The TV then returns a fresh session id.
         _ = try? await request("_tiStop")
         let response = try await request("_tiStart")
-        if let data = response["_tiD"]?.dataValue {
-            textSessionUUID = RTISession.sessionUUID(from: data)
-        }
+        textSessionUUID = response["_tiD"]?.dataValue.flatMap { RTISession.sessionUUID(from: $0) }
         guard textSessionUUID != nil else { throw CompanionError.textInputInactive }
     }
 
+    /// Inserts `text` at the cursor of the active field.
     public func typeText(_ text: String) async throws {
-        if textSessionUUID == nil { try await beginTextInput() }
-        guard let uuid = textSessionUUID else { throw CompanionError.textInputInactive }
-        try await event("_tiC", content: .dictionary([
-            "_tiV": .int(1),
-            "_tiD": .data(RTIPayload.inputText(sessionUUID: uuid, text: text)),
-        ]))
+        try await sendTextOperation { RTIPayload.inputText(sessionUUID: $0, text: text) }
     }
 
+    /// Clears the active field.
     public func clearText() async throws {
+        try await sendTextOperation { RTIPayload.clearText(sessionUUID: $0) }
+    }
+
+    private func sendTextOperation(_ payload: (Data) -> Data) async throws {
         if textSessionUUID == nil { try await beginTextInput() }
         guard let uuid = textSessionUUID else { throw CompanionError.textInputInactive }
         try await event("_tiC", content: .dictionary([
             "_tiV": .int(1),
-            "_tiD": .data(RTIPayload.clearText(sessionUUID: uuid)),
+            "_tiD": .data(payload(uuid)),
         ]))
-    }
-
-    public func endTextInput() async {
-        _ = try? await request("_tiStop")
-        textSessionUUID = nil
     }
 }

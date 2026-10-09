@@ -29,11 +29,7 @@ enum URLCommand: Equatable {
         case "device":
             return argument.isEmpty ? nil : .device(argument)
         case "media":
-            let mapping: [String: MediaCommand] = [
-                "play": .play, "pause": .pause, "toggle": .togglePlayPause, "next": .nextTrack,
-                "previous": .previousTrack, "skip-forward": .skipForward, "skip-backward": .skipBackward,
-            ]
-            guard let command = mapping[argument] else { return nil }
+            guard let command = MediaCommand(commandName: argument) else { return nil }
             return .media(command)
         case "wake": return .wake
         case "sleep": return .sleep

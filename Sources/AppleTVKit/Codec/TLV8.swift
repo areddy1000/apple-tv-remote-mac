@@ -37,7 +37,8 @@ public enum TLV8DecodeError: Error, Sendable, Equatable {
 }
 
 /// Encodes and decodes TLV8. A value longer than 255 bytes spans repeated tags.
-public struct TLV8: Sendable {
+public enum TLV8 {
+    /// Encodes items in order. An empty value writes the tag with length zero.
     public static func encode(_ items: [(UInt8, Data)]) -> Data {
         var out = Data()
         for (tag, value) in items {
@@ -62,11 +63,12 @@ public struct TLV8: Sendable {
         encode(items.map { ($0.0.rawValue, $0.1) })
     }
 
+    /// Decodes a buffer into values keyed by tag. Adjacent repeats of one tag join into one value.
     public static func decode(_ data: Data) throws -> [UInt8: Data] {
         var result: [UInt8: Data] = [:]
         let bytes = [UInt8](data)
         var pos = 0
-        var lastTag: UInt8? = nil
+        var lastTag: UInt8?
         while pos < bytes.count {
             guard pos + 2 <= bytes.count else { throw TLV8DecodeError.truncated }
             let tag = bytes[pos]
@@ -75,8 +77,8 @@ public struct TLV8: Sendable {
             guard pos + length <= bytes.count else { throw TLV8DecodeError.truncated }
             let value = Data(bytes[pos..<(pos + length)])
             pos += length
-            if lastTag == tag, result[tag] != nil {
-                result[tag]!.append(value)
+            if lastTag == tag {
+                result[tag, default: Data()].append(value)
             } else {
                 result[tag] = value
             }
@@ -93,6 +95,7 @@ public struct TLV8: Sendable {
 }
 
 extension Dictionary where Key == UInt8, Value == Data {
+    /// Looks up a decoded value by its tag.
     public subscript(tag: TLV8Tag) -> Data? {
         self[tag.rawValue]
     }

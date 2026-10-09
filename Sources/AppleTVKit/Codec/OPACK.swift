@@ -18,11 +18,6 @@ public indirect enum OPACKValue: Sendable, Equatable {
         return nil
     }
 
-    public var boolValue: Bool? {
-        if case .bool(let v) = self { return v }
-        return nil
-    }
-
     public var intValue: Int64? {
         switch self {
         case .int(let v): return v
@@ -48,16 +43,6 @@ public indirect enum OPACKValue: Sendable, Equatable {
 
     public var dataValue: Data? {
         if case .data(let v) = self { return v }
-        return nil
-    }
-
-    public var uuidValue: UUID? {
-        if case .uuid(let v) = self { return v }
-        return nil
-    }
-
-    public var arrayValue: [OPACKValue]? {
-        if case .array(let v) = self { return v }
         return nil
     }
 
@@ -103,8 +88,9 @@ public enum OPACK {
 
     private struct Encoder {
         var out = Data()
-        /// Objects that a pointer can reference. Index matches the decoder list.
-        var objects: [Data] = []
+        /// Encoded objects that a pointer can reference, keyed by their bytes.
+        /// The index matches the decoder object list.
+        var objectIndex: [Data: Int] = [:]
 
         mutating func write(_ value: OPACKValue) {
             switch value {
@@ -175,21 +161,18 @@ public enum OPACK {
                     out.append(0x03)
                 }
             case .dictionary(let dict):
-                let keys = dict.keys.sorted()
-                if keys.count < 15 {
-                    out.append(0xE0 + UInt8(keys.count))
-                    for key in keys {
-                        write(.string(key))
-                        write(dict[key]!)
-                    }
+                // Sorted keys make the output stable for tests and logs.
+                let pairs = dict.sorted { $0.key < $1.key }
+                if pairs.count < 15 {
+                    out.append(0xE0 + UInt8(pairs.count))
                 } else {
                     out.append(0xEF)
-                    for key in keys {
-                        write(.string(key))
-                        write(dict[key]!)
-                    }
-                    out.append(0x03)
                 }
+                for (key, item) in pairs {
+                    write(.string(key))
+                    write(item)
+                }
+                if pairs.count >= 15 { out.append(0x03) }
             }
         }
 
@@ -225,7 +208,7 @@ public enum OPACK {
 
         /// Writes a pointer when the same object was written before. Otherwise writes the object.
         mutating func writeObject(_ chunk: Data) {
-            if let index = objects.firstIndex(of: chunk) {
+            if let index = objectIndex[chunk] {
                 if index <= 0x20 {
                     out.append(0xA0 + UInt8(index))
                 } else if index <= 0xFF {
@@ -243,7 +226,7 @@ public enum OPACK {
                 }
                 return
             }
-            objects.append(chunk)
+            objectIndex[chunk] = objectIndex.count
             out.append(chunk)
         }
     }

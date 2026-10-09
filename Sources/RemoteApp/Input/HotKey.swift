@@ -3,15 +3,18 @@ import Carbon
 
 /// A system-wide hotkey. Default: Control-Option-R summons the remote.
 /// Carbon is the only public API for this without the Accessibility permission.
+/// The app keeps one instance for its whole life, so there is no unregister path.
 @MainActor
 final class HotKey {
     private var reference: EventHotKeyRef?
     private var handler: EventHandlerRef?
     private let action: () -> Void
 
-    /// Key code for R.
+    /// Virtual key code for R.
     static let defaultKeyCode: UInt32 = 15
-    static let defaultModifiers: UInt32 = UInt32(controlKey | optionKey)
+    static let defaultModifiers = UInt32(controlKey | optionKey)
+    /// Four-character tag "ATVR" that marks this app's hotkey events.
+    private static let signature: OSType = 0x4154_5652
 
     init(keyCode: UInt32 = HotKey.defaultKeyCode, modifiers: UInt32 = HotKey.defaultModifiers, action: @escaping () -> Void) {
         self.action = action
@@ -20,6 +23,7 @@ final class HotKey {
 
     private func register(keyCode: UInt32, modifiers: UInt32) {
         var eventType = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        // The handler receives `self` unretained. The instance outlives the handler, see above.
         let selfPointer = Unmanaged.passUnretained(self).toOpaque()
         InstallEventHandler(GetApplicationEventTarget(), { _, _, userData in
             guard let userData else { return noErr }
@@ -28,15 +32,7 @@ final class HotKey {
             return noErr
         }, 1, &eventType, selfPointer, &handler)
 
-        let id = EventHotKeyID(signature: OSType(0x4154_5652), id: 1)
+        let id = EventHotKeyID(signature: Self.signature, id: 1)
         RegisterEventHotKey(keyCode, modifiers, id, GetApplicationEventTarget(), 0, &reference)
-    }
-
-    /// Removes the hotkey. The app keeps one instance for its whole life, so this is rare.
-    func unregister() {
-        if let reference { UnregisterEventHotKey(reference) }
-        if let handler { RemoveEventHandler(handler) }
-        reference = nil
-        handler = nil
     }
 }

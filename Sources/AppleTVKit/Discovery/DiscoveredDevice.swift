@@ -11,10 +11,6 @@ public struct DiscoveredDevice: Identifiable, Sendable {
     public var name: String
     /// The hardware model, for example "AppleTV14,1".
     public var model: String?
-    /// The host name, for example "Living-Room-2.local.".
-    public var host: String?
-    public var companionPort: UInt16?
-    public var airplayPort: UInt16?
     /// The MAC address from the AirPlay `deviceid` record. Wake-on-LAN uses it.
     public var macAddress: String?
     /// The tvOS version from the AirPlay `osvers` record.
@@ -24,13 +20,10 @@ public struct DiscoveredDevice: Identifiable, Sendable {
     /// True when a model record starts with "AppleTV".
     public var isAppleTV: Bool
 
-    public init(
+    init(
         id: String,
         name: String,
         model: String? = nil,
-        host: String? = nil,
-        companionPort: UInt16? = nil,
-        airplayPort: UInt16? = nil,
         macAddress: String? = nil,
         osVersion: String? = nil,
         companionEndpoint: NWEndpoint? = nil,
@@ -40,9 +33,6 @@ public struct DiscoveredDevice: Identifiable, Sendable {
         self.id = id
         self.name = name
         self.model = model
-        self.host = host
-        self.companionPort = companionPort
-        self.airplayPort = airplayPort
         self.macAddress = macAddress
         self.osVersion = osVersion
         self.companionEndpoint = companionEndpoint

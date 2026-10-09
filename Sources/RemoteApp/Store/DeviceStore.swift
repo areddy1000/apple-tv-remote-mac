@@ -11,8 +11,7 @@ final class DeviceStore {
 
     var devices: [DiscoveredDevice] = []
     var selectedDeviceID: String?
-    var selectedName: String = "Apple TV"
-    var selectedModel: String = ""
+    var selectedName = "Apple TV"
 
     // MARK: Link
 
@@ -21,42 +20,54 @@ final class DeviceStore {
     var nowPlaying: NowPlaying?
     var textInput: TextInputState = .inactive
     var apps: [LaunchableApp] = []
+    /// The volume as 0...1. Nil when the current output reports no level.
     var volume: Double?
     var lastError: String?
 
     // MARK: Pairing
 
-    var pinEntry: String = ""
-    var pairingTitle: String = ""
+    var pinEntry = ""
+    var pairingTitle = ""
 
     // MARK: UI state
 
     var pressedButtons: Set<RemoteButton> = []
     var paletteVisible = false
     var keyboardVisible = false
-    var surfacePointer: CGPoint? = nil
-    var surfaceActive = false
-    var hotKeyPanelRequested = false
+    /// True while the user drags the volume slider. TV reports are ignored then.
+    var volumeDragging = false
 
     // MARK: Controller
 
     private(set) var controller: (any RemoteController)?
     private var eventTask: Task<Void, Never>?
+    private var pollTask: Task<Void, Never>?
+    private var volumeSendTask: Task<Void, Never>?
+    private var pendingVolume: Double?
+
+    /// How often the store asks the TV for its power and volume state.
+    private static let pollInterval: Duration = .seconds(15)
+    /// The shortest gap between two volume requests while the slider moves.
+    private static let volumeSendInterval: Duration = .milliseconds(60)
 
     /// Connects the UI to a controller. Any previous controller disconnects first.
-    func attach(_ controller: any RemoteController, name: String, model: String) {
+    func attach(_ controller: any RemoteController, name: String) {
         eventTask?.cancel()
+        pollTask?.cancel()
+        volumeSendTask?.cancel()
+        volumeSendTask = nil
+        pendingVolume = nil
         if let old = self.controller {
             Task { await old.disconnect() }
         }
         self.controller = controller
-        self.selectedDeviceID = controller.id
-        self.selectedName = name
-        self.selectedModel = model
-        self.nowPlaying = nil
-        self.apps = []
-        self.textInput = .inactive
-        self.connection = .idle
+        selectedDeviceID = controller.id
+        selectedName = name
+        nowPlaying = nil
+        apps = []
+        textInput = .inactive
+        volume = nil
+        connection = .idle
 
         eventTask = Task { [weak self] in
             for await event in controller.events {
@@ -90,17 +101,11 @@ final class DeviceStore {
         case .apps(let list):
             apps = list
         case .volume(let level):
-            // A negative level means the output has no volume control.
-            if !volumeDragging { volume = level >= 0 ? level : nil }
+            if !volumeDragging { volume = level == DeviceEvent.noVolumeLevel ? nil : level }
         }
     }
 
     // MARK: Volume
-
-    /// True while the user drags the slider. TV reports are ignored then.
-    var volumeDragging = false
-    private var volumeSendTask: Task<Void, Never>?
-    private var pendingVolume: Double?
 
     /// Sets the level from the slider. Sends at most one request each 60 ms.
     func setVolume(_ level: Double) {
@@ -108,12 +113,12 @@ final class DeviceStore {
         pendingVolume = level
         guard volumeSendTask == nil else { return }
         volumeSendTask = Task { [weak self] in
-            while let self, let next = self.pendingVolume {
+            while let self, !Task.isCancelled, let next = self.pendingVolume {
                 self.pendingVolume = nil
                 if let controller = self.controller {
                     try? await controller.setVolume(next)
                 }
-                try? await Task.sleep(for: .milliseconds(60))
+                try? await Task.sleep(for: Self.volumeSendInterval)
             }
             self?.volumeSendTask = nil
         }
@@ -121,10 +126,9 @@ final class DeviceStore {
 
     func refreshVolume() {
         guard let controller else { return }
-        Task {
-            if let level = try? await controller.volumeLevel() {
-                if !volumeDragging { volume = level }
-            }
+        Task { [weak self] in
+            guard let level = try? await controller.volumeLevel(), let self, !self.volumeDragging else { return }
+            self.volume = level
         }
     }
 
@@ -134,31 +138,30 @@ final class DeviceStore {
     func togglePower() {
         guard let controller else { return }
         let wasAsleep = power == .asleep
-        Task {
+        Task { [weak self] in
             if wasAsleep { await controller.wake() } else { await controller.sleep() }
             try? await Task.sleep(for: .seconds(2))
-            refreshPower()
+            self?.refreshPower()
             try? await Task.sleep(for: .seconds(4))
-            refreshPower()
+            self?.refreshPower()
         }
     }
 
     func refreshPower() {
         guard let controller, connection.isConnected else { return }
-        Task {
-            if let state = try? await controller.powerState() { power = state }
+        Task { [weak self] in
+            guard let state = try? await controller.powerState() else { return }
+            self?.power = state
         }
     }
 
-    private var pollTask: Task<Void, Never>?
-
     /// Polls power and volume while connected. The TV does not push power changes.
-    func startPolling() {
+    private func startPolling() {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
-            while let self, !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(15))
-                guard self.connection.isConnected else { continue }
+            while !Task.isCancelled {
+                try? await Task.sleep(for: Self.pollInterval)
+                guard let self, self.connection.isConnected else { continue }
                 self.refreshPower()
                 self.refreshVolume()
             }
@@ -195,9 +198,9 @@ final class DeviceStore {
     /// Shows the pressed state for a moment after a click that had no mouse down.
     private func flash(_ button: RemoteButton) {
         pressedButtons.insert(button)
-        Task {
+        Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(90))
-            pressedButtons.remove(button)
+            self?.pressedButtons.remove(button)
         }
     }
 
@@ -206,37 +209,42 @@ final class DeviceStore {
     }
 
     func media(_ command: MediaCommand) {
-        guard let controller else { return }
-        Task {
-            do { try await controller.media(command) } catch { lastError = error.localizedDescription }
-        }
+        perform { try await $0.media(command) }
     }
 
     func typeText(_ text: String) {
-        guard let controller else { return }
-        Task {
-            do { try await controller.typeText(text) } catch { lastError = error.localizedDescription }
-        }
+        perform { try await $0.typeText(text) }
     }
 
     func clearText() {
-        guard let controller else { return }
-        Task {
-            do { try await controller.clearText() } catch { lastError = error.localizedDescription }
-        }
+        perform { try await $0.clearText() }
     }
 
     func loadApps() {
         guard let controller else { return }
-        Task {
-            do { apps = try await controller.launchableApps() } catch { lastError = error.localizedDescription }
+        Task { [weak self] in
+            do {
+                let list = try await controller.launchableApps()
+                self?.apps = list
+            } catch {
+                self?.lastError = error.localizedDescription
+            }
         }
     }
 
     func launch(_ app: LaunchableApp) {
+        perform { try await $0.launch(bundleID: app.bundleID) }
+    }
+
+    /// Runs one controller call and shows its error, if any.
+    private func perform(_ action: @escaping @Sendable (any RemoteController) async throws -> Void) {
         guard let controller else { return }
-        Task {
-            do { try await controller.launch(bundleID: app.bundleID) } catch { lastError = error.localizedDescription }
+        Task { [weak self] in
+            do {
+                try await action(controller)
+            } catch {
+                self?.lastError = error.localizedDescription
+            }
         }
     }
 

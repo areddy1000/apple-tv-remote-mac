@@ -3,10 +3,12 @@ import Foundation
 /// Now-playing for one Apple TV over the AirPlay 2 MRP tunnel.
 /// Pairs on first use, then verifies, opens the channels and runs MRP.
 public actor AirPlayNowPlaying {
-    public let host: String
-    public let port: UInt16
+    private let host: String
+    private let port: UInt16
     private let clientID: String
     private let name: String
+    /// The address this Mac presents to the TV, as colon-separated hex.
+    private let deviceAddress: String
     private let pin: @Sendable (String) async -> String?
     private var session: AP2Session?
     private var mrp: MRPSession?
@@ -14,11 +16,19 @@ public actor AirPlayNowPlaying {
     public nonisolated let nowPlaying: AsyncStream<NowPlaying?>
     private let nowPlayingContinuation: AsyncStream<NowPlaying?>.Continuation
 
-    public init(host: String, port: UInt16, clientID: String, name: String, pin: @escaping @Sendable (String) async -> String?) {
+    public init(
+        host: String,
+        port: UInt16,
+        clientID: String,
+        name: String,
+        deviceAddress: String,
+        pin: @escaping @Sendable (String) async -> String?
+    ) {
         self.host = host
         self.port = port
         self.clientID = clientID
         self.name = name
+        self.deviceAddress = deviceAddress
         self.pin = pin
         let (stream, continuation) = AsyncStream.makeStream(of: NowPlaying?.self, bufferingPolicy: .bufferingNewest(1))
         self.nowPlaying = stream
@@ -28,7 +38,7 @@ public actor AirPlayNowPlaying {
     /// Connects. Pairs with a PIN when `credentials` is nil. Returns the credentials in use.
     public func connect(credentials: HAPCredentials?) async throws -> HAPCredentials {
         await close()
-        let identity = AirPlayIdentity(name: name)
+        let identity = AirPlayIdentity(name: name, deviceID: deviceAddress, macAddress: deviceAddress)
         let session = AP2Session(host: host, port: port, identity: identity)
         try await session.openControl()
         var inUse = credentials
@@ -65,11 +75,7 @@ public actor AirPlayNowPlaying {
         try await mrp.send(command)
     }
 
-    public func seek(to position: Double) async throws {
-        guard let mrp else { throw MRPError.closed }
-        try await mrp.seek(to: position)
-    }
-
+    /// True once the MRP session runs.
     public var isConnected: Bool { mrp != nil }
 
     public func close() async {

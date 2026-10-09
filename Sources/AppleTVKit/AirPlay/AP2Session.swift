@@ -18,8 +18,8 @@ public struct AirPlayIdentity: Sendable {
         osName: String = "iPhone OS",
         osVersion: String = "14.7.1",
         osBuild: String = "18G82",
-        deviceID: String = "FF:70:79:61:74:76",
-        macAddress: String = "FF:70:79:61:74:76"
+        deviceID: String,
+        macAddress: String
     ) {
         self.name = name
         self.model = model

@@ -7,12 +7,15 @@ public enum WakeOnLAN {
         case badMACAddress
     }
 
+    private static let broadcastAddress = "255.255.255.255"
+    private static let ports: [UInt16] = [9, 7]
+
     /// Sends the magic packet two times to the broadcast address on ports 9 and 7.
     public static func send(mac: String) async throws {
         let packet = try magicPacket(mac: mac)
         for _ in 0..<2 {
-            for port: UInt16 in [9, 7] {
-                try await send(packet, to: "255.255.255.255", port: port)
+            for port in ports {
+                try await send(packet, to: broadcastAddress, port: port)
             }
         }
     }
@@ -34,44 +37,26 @@ public enum WakeOnLAN {
     private static func send(_ packet: Data, to host: String, port: UInt16) async throws {
         let parameters = NWParameters.udp
         parameters.allowLocalEndpointReuse = true
-        let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!)
+        let endpoint = NWEndpoint.hostPort(host: NWEndpoint.Host(host), port: NWEndpoint.Port(integerLiteral: port))
         let connection = NWConnection(to: endpoint, using: parameters)
         let queue = DispatchQueue(label: "atv.wol")
-        let gate = Gate()
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let once = ResumeOnce(continuation)
             connection.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
                     connection.send(content: packet, completion: .contentProcessed { error in
                         connection.cancel()
-                        if let error {
-                            gate.resume(continuation, .failure(error))
-                        } else {
-                            gate.resume(continuation, .success(()))
-                        }
+                        once.resume(error.map { .failure($0) } ?? .success(()))
                     })
                 case .failed(let error):
                     connection.cancel()
-                    gate.resume(continuation, .failure(error))
+                    once.resume(.failure(error))
                 default:
                     break
                 }
             }
             connection.start(queue: queue)
         }
-    }
-}
-
-/// Lets a continuation resume one time only.
-private final class Gate: @unchecked Sendable {
-    private let lock = NSLock()
-    private var done = false
-
-    func resume(_ continuation: CheckedContinuation<Void, Error>, _ result: Result<Void, Error>) {
-        lock.lock()
-        defer { lock.unlock() }
-        guard !done else { return }
-        done = true
-        continuation.resume(with: result)
     }
 }

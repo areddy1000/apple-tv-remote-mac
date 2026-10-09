@@ -5,27 +5,27 @@ public struct StoredDevice: Codable, Sendable, Equatable {
     public var name: String
     public var companion: HAPCredentials?
     public var airplay: HAPCredentials?
+    /// The MAC address for Wake-on-LAN.
     public var macAddress: String?
-    public var lastHost: String?
 
-    public init(name: String, companion: HAPCredentials? = nil, airplay: HAPCredentials? = nil, macAddress: String? = nil, lastHost: String? = nil) {
+    public init(name: String, companion: HAPCredentials? = nil, airplay: HAPCredentials? = nil, macAddress: String? = nil) {
         self.name = name
         self.companion = companion
         self.airplay = airplay
         self.macAddress = macAddress
-        self.lastHost = lastHost
     }
 }
 
 /// Persists credentials as JSON in Application Support with mode 0600.
 /// A file store avoids Keychain prompts that an ad-hoc signed build triggers on each rebuild.
 public actor CredentialStore {
-    public static let directoryName = "AppleTVRemote"
+    static let directoryName = "AppleTVRemote"
 
     private let fileURL: URL
     private var devices: [String: StoredDevice] = [:]
     private var loaded = false
 
+    /// - Parameter directory: The folder for the files. The default is Application Support.
     public init(directory: URL? = nil) {
         let base = directory ?? Self.defaultDirectory()
         fileURL = base.appendingPathComponent("credentials.json")
@@ -59,11 +59,6 @@ public actor CredentialStore {
         try persist()
     }
 
-    public func all() throws -> [String: StoredDevice] {
-        try loadIfNeeded()
-        return devices
-    }
-
     private func loadIfNeeded() throws {
         if !loaded { try load() }
     }
@@ -80,13 +75,13 @@ public actor CredentialStore {
     // MARK: - Shared helpers
 
     /// The default directory in Application Support.
-    public static func defaultDirectory() -> URL {
+    static func defaultDirectory() -> URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return support.appendingPathComponent(directoryName, isDirectory: true)
     }
 
     /// Creates the directory with mode 0700 when it is absent.
-    static func ensureDirectory(_ url: URL) throws {
+    private static func ensureDirectory(_ url: URL) throws {
         if !FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.createDirectory(
                 at: url,
@@ -97,7 +92,7 @@ public actor CredentialStore {
     }
 
     /// Returns a stable pairing identifier for this Mac.
-    /// The first call makes a random UUID and stores it in `client-id.txt`.
+    /// The first call makes a random UUID and stores it in a file.
     /// Each `role` gets its own UUID. The TV keeps one pairing per UUID, so the
     /// Companion pairing and the AirPlay pairing must not share one.
     public static func clientID(role: String = "", directory: URL? = nil) -> String {
@@ -109,9 +104,14 @@ public actor CredentialStore {
             if !value.isEmpty { return value }
         }
         let value = UUID().uuidString
-        try? ensureDirectory(base)
-        try? Data(value.utf8).write(to: url, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        do {
+            try ensureDirectory(base)
+            try Data(value.utf8).write(to: url, options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        } catch {
+            // A lost identifier means a new pairing on the next launch. Say so.
+            ATVLog.pairing.error("cannot store the client identifier: \(error.localizedDescription, privacy: .public)")
+        }
         return value
     }
 }

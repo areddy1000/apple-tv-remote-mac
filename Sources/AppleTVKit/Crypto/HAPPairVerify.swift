@@ -18,36 +18,32 @@ public final class HAPPairVerify {
     /// Builds M1 with state 1 and our ephemeral public key.
     public func m1() -> Data {
         step = .sentM1
-        return HAPTLV.encode([
-            (HAPTag.state, Data([1])),
-            (HAPTag.publicKey, ephemeral.publicKey.rawRepresentation),
+        return TLV8.encode([
+            (.state, Data([1])),
+            (.publicKey, ephemeral.publicKey.rawRepresentation),
         ])
     }
 
     /// Consumes M2, verifies the accessory, and builds the encrypted M3.
     public func m3(m2: Data) throws -> Data {
         guard step == .sentM1 else { throw HAPError.wrongStep }
-        let tlv = HAPTLV.decode(m2)
+        let tlv = try TLV8.decode(m2)
         try HAPCrypto.checkState(tlv, expected: 2)
-        let accessoryEphemeral = try HAPCrypto.field(tlv, HAPTag.publicKey)
-        let encrypted = try HAPCrypto.field(tlv, HAPTag.encryptedData)
+        let accessoryEphemeral = try HAPCrypto.field(tlv, .publicKey)
+        let encrypted = try HAPCrypto.field(tlv, .encryptedData)
 
-        guard let accessoryKey = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: accessoryEphemeral) else {
-            throw HAPError.invalidKey
-        }
-        let agreement: SharedSecret
-        do {
-            agreement = try ephemeral.sharedSecretFromKeyAgreement(with: accessoryKey)
-        } catch {
+        guard let accessoryKey = try? Curve25519.KeyAgreement.PublicKey(rawRepresentation: accessoryEphemeral),
+              let agreement = try? ephemeral.sharedSecretFromKeyAgreement(with: accessoryKey)
+        else {
             throw HAPError.invalidKey
         }
         sharedSecret = agreement.withUnsafeBytes { Data($0) }
         let sessionKey = HAPKDF.derive(secret: sharedSecret, salt: "Pair-Verify-Encrypt-Salt", info: "Pair-Verify-Encrypt-Info")
 
         let plain = try HAPCrypto.open(encrypted, key: sessionKey, nonce: HAPCrypto.nonce("PV-Msg02"), aad: Data())
-        let sub = HAPTLV.decode(plain)
-        let identifier = try HAPCrypto.field(sub, HAPTag.identifier)
-        let signature = try HAPCrypto.field(sub, HAPTag.signature)
+        let sub = try TLV8.decode(plain)
+        let identifier = try HAPCrypto.field(sub, .identifier)
+        let signature = try HAPCrypto.field(sub, .signature)
         guard identifier == credentials.accessoryID else { throw HAPError.identifierMismatch }
         guard let ltpk = try? Curve25519.Signing.PublicKey(rawRepresentation: credentials.ltpk) else {
             throw HAPError.invalidKey
@@ -61,22 +57,22 @@ public final class HAPPairVerify {
         }
         let clientInfo = clientEphemeral + credentials.clientID + accessoryEphemeral
         let clientSignature = try ltsk.signature(for: clientInfo)
-        let reply = HAPTLV.encode([
-            (HAPTag.identifier, credentials.clientID),
-            (HAPTag.signature, clientSignature),
+        let reply = TLV8.encode([
+            (.identifier, credentials.clientID),
+            (.signature, clientSignature),
         ])
         let sealed = try HAPCrypto.seal(reply, key: sessionKey, nonce: HAPCrypto.nonce("PV-Msg03"), aad: Data())
         step = .sentM3
-        return HAPTLV.encode([
-            (HAPTag.state, Data([3])),
-            (HAPTag.encryptedData, sealed),
+        return TLV8.encode([
+            (.state, Data([3])),
+            (.encryptedData, sealed),
         ])
     }
 
     /// Consumes M4 and checks for success.
     public func finish(m4: Data) throws {
         guard step == .sentM3 else { throw HAPError.wrongStep }
-        let tlv = HAPTLV.decode(m4)
+        let tlv = try TLV8.decode(m4)
         try HAPCrypto.checkState(tlv, expected: 4)
         step = .done
     }

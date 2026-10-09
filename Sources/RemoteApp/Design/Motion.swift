@@ -21,15 +21,8 @@ enum Motion {
     static let rows = Animation.spring(response: 0.25, dampingFraction: 0.9)
     /// Artwork crossfade.
     static let crossfade = Animation.easeOut(duration: 0.25)
-    /// Content changes when the device switches.
-    static let deviceSwitch = Animation.spring(response: 0.25, dampingFraction: 1.0)
     /// Reduced motion: a short crossfade with no movement.
     static let reduced = Animation.easeOut(duration: 0.15)
-
-    /// Picks the animation for the current accessibility setting.
-    static func pick(_ animation: Animation, reduceMotion: Bool) -> Animation {
-        reduceMotion ? reduced : animation
-    }
 
     /// Scale while a button is pressed.
     static let pressScale: CGFloat = 0.96
@@ -37,11 +30,6 @@ enum Motion {
     static let stagger: Double = 0.03
     /// Rubber-band constant for the touch surface edges.
     static let rubberBand: CGFloat = 0.55
-}
-
-/// Apple's momentum projection. Returns the distance a flick travels.
-func projectMomentum(velocity: CGFloat, decelerationRate: CGFloat = 0.998) -> CGFloat {
-    (velocity / 1000) * decelerationRate / (1 - decelerationRate)
 }
 
 /// Progressive resistance past a boundary.

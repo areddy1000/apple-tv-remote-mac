@@ -123,6 +123,26 @@ public enum MediaCommand: String, Sendable, CaseIterable {
     case previousTrack
     case skipForward
     case skipBackward
+
+    /// The command line and URL name, for example `toggle` or `skip-forward`.
+    public var commandName: String {
+        switch self {
+        case .play: "play"
+        case .pause: "pause"
+        case .togglePlayPause: "toggle"
+        case .nextTrack: "next"
+        case .previousTrack: "previous"
+        case .skipForward: "skip-forward"
+        case .skipBackward: "skip-backward"
+        }
+    }
+
+    public init?(commandName: String) {
+        guard let match = MediaCommand.allCases.first(where: { $0.commandName == commandName }) else {
+            return nil
+        }
+        self = match
+    }
 }
 
 /// The link between the Mac and one Apple TV.
@@ -224,10 +244,14 @@ public enum DeviceEvent: Sendable {
     case nowPlaying(NowPlaying?)
     case textInput(TextInputState)
     case apps([LaunchableApp])
+    /// The volume as 0...1, or `noVolumeLevel` when the output has no level.
     case volume(Double)
+
+    /// The value `volume` carries when the output reports no level.
+    public static let noVolumeLevel: Double = -1
 }
 
-/// The control surface the UI talks to. The mock and the live device both conform.
+/// The control surface the UI talks to. `AppleTVDevice` and `MockController` conform.
 public protocol RemoteController: AnyObject, Sendable {
     var id: String { get }
     var events: AsyncStream<DeviceEvent> { get }
@@ -257,100 +281,5 @@ extension RemoteController {
     public func press(_ button: RemoteButton) {
         self.button(button, down: true)
         self.button(button, down: false)
-    }
-}
-
-/// A controller that logs every command. The UI prototype runs on it.
-public final class MockController: RemoteController, Sendable {
-    public let id: String
-    public let events: AsyncStream<DeviceEvent>
-    private let continuation: AsyncStream<DeviceEvent>.Continuation
-
-    public init(id: String = "mock") {
-        self.id = id
-        let (stream, continuation) = AsyncStream.makeStream(of: DeviceEvent.self)
-        self.events = stream
-        self.continuation = continuation
-    }
-
-    public func button(_ button: RemoteButton, down: Bool) {
-        let probe = LatencyProbe("mock.button")
-        ATVLog.input.info("mock button \(button.title, privacy: .public) \(down ? "down" : "up", privacy: .public)")
-        probe.end()
-    }
-
-    public func touch(_ event: TouchEvent) {
-        ATVLog.input.debug("mock touch \(event.phase.rawValue) \(Int(event.x)),\(Int(event.y))")
-    }
-
-    public func typeText(_ text: String) async throws {
-        ATVLog.input.info("mock type \(text, privacy: .private)")
-        continuation.yield(.textInput(.active(current: text)))
-    }
-
-    public func clearText() async throws {
-        continuation.yield(.textInput(.active(current: "")))
-    }
-
-    public func launchableApps() async throws -> [LaunchableApp] {
-        [
-            LaunchableApp(bundleID: "com.apple.TVWatchList", name: "Apple TV"),
-            LaunchableApp(bundleID: "com.apple.TVMusic", name: "Music"),
-            LaunchableApp(bundleID: "com.google.ios.youtube", name: "YouTube"),
-            LaunchableApp(bundleID: "com.netflix.Netflix", name: "Netflix"),
-            LaunchableApp(bundleID: "com.apple.TVPhotos", name: "Photos"),
-            LaunchableApp(bundleID: "com.apple.TVSettings", name: "Settings"),
-            LaunchableApp(bundleID: "com.apple.TVAppStore", name: "App Store"),
-            LaunchableApp(bundleID: "com.plexapp.plex", name: "Plex"),
-        ]
-    }
-
-    public func launch(bundleID: String) async throws {
-        ATVLog.input.info("mock launch \(bundleID, privacy: .public)")
-    }
-
-    public func media(_ command: MediaCommand) async throws {
-        ATVLog.input.info("mock media \(command.rawValue, privacy: .public)")
-    }
-
-    public func volumeLevel() async throws -> Double? { 0.42 }
-
-    public func setVolume(_ level: Double) async throws {
-        continuation.yield(.volume(level))
-    }
-
-    public func powerState() async throws -> PowerState { .awake }
-
-    public func wake() async {
-        continuation.yield(.power(.awake))
-    }
-
-    public func sleep() async {
-        continuation.yield(.power(.asleep))
-    }
-
-    public func connect() async {
-        continuation.yield(.connection(.connecting))
-        try? await Task.sleep(for: .milliseconds(400))
-        continuation.yield(.connection(.connected))
-        continuation.yield(.power(.awake))
-        continuation.yield(.nowPlaying(NowPlaying(
-            title: "Severance",
-            subtitle: "S2 E4 · Woe's Hollow",
-            appName: "Apple TV",
-            duration: 3_240,
-            elapsed: 1_212,
-            elapsedAt: .now,
-            rate: 1
-        )))
-    }
-
-    public func disconnect() async {
-        continuation.yield(.connection(.idle))
-    }
-
-    /// Test hook. Pushes an event as if the device sent it.
-    public func emit(_ event: DeviceEvent) {
-        continuation.yield(event)
     }
 }
