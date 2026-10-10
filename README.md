@@ -61,9 +61,8 @@ the app and a progress bar. The card has pause, play, skip back and skip forward
 Each skip moves ten seconds. Drag anywhere on the progress bar to seek. The time labels follow
 the pointer while you drag, and playback moves when you let go.
 
-A volume slider appears below the buttons when the TV reports a volume level. A television
-on HDMI-CEC reports no level, so the slider stays hidden. AirPlay speakers and HomePods
-report a level.
+A volume slider appears below the buttons when a volume level is known. Set up the volume
+hook below when your volume keys do nothing.
 
 ## Keys
 
@@ -152,10 +151,74 @@ open "atvremote://sleep"
 
 The `press` and `media` verbs take the same names as the command line tool.
 
+## Volume hook
+
+Volume works out of the box when the Apple TV has a volume route of its own. That means a
+soundbar or receiver on HDMI ARC, or an AirPlay speaker such as a HomePod.
+
+Many televisions give the Apple TV no such route. The Apple TV then sends volume by infrared
+from the remote itself, and no network client can reach that, not this app and not Apple's
+own Remote app. The symptom is plain: the Apple TV blinks when you press the key, and
+nothing happens.
+
+The hook fixes that by talking to the television directly. Put a file named
+`volume-command.json` in `~/Library/Application Support/AppleTVRemote/`:
+
+```json
+{
+  "up":   "my-tv-tool up",
+  "down": "my-tv-tool down",
+  "set":  "my-tv-tool set {level}",
+  "get":  "my-tv-tool get"
+}
+```
+
+Every field is optional. `up` and `down` run for one press of the volume keys. `set` runs
+when you drag the slider, with `{level}` replaced by a whole number from 0 to 100. `get`
+prints the level as a whole number from 0 to 100, and the slider appears when it is present.
+
+Each value is a shell command run with your own account, the same trust as a shell alias.
+The app never writes this file. It re-reads it when you change it, so there is no restart.
+The hook runs only when the Apple TV reports no volume route, so a later soundbar takes
+over by itself.
+
+Check it from the terminal with the app closed:
+
+```sh
+.build/debug/atvctl volume        # prints the level
+.build/debug/atvctl volume 30     # sets the level
+```
+
+### Commands for common televisions
+
+The tools below are other people's projects. Pick the one for your brand, confirm it works
+in a terminal, then put it in the file.
+
+**Roku TV**, including TCL, Hisense and onn. No pairing, nothing to install:
+
+```json
+{
+  "up":   "curl -s -X POST http://TV-ADDRESS:8060/keypress/VolumeUp",
+  "down": "curl -s -X POST http://TV-ADDRESS:8060/keypress/VolumeDown"
+}
+```
+
+**LG webOS**, with [aiowebostv](https://github.com/home-assistant-libs/aiowebostv). It reports
+a level, so the slider works. The television shows a prompt the first time you connect.
+
+**Samsung Tizen**, with [samsungtvws](https://github.com/xchwarze/samsung-tv-ws-api). Keys
+only, no level.
+
+**Sony Bravia**, with the pre-shared key from the television's own menu.
+
+**Anything else.** Any script that exits zero counts. The `get` command only has to print a
+number.
+
 ## Where the app keeps its data
 
 The pairing keys are in `~/Library/Application Support/AppleTVRemote/`. The files have mode
-0600. Delete the folder to remove every pairing.
+0600. Delete the folder to remove every pairing. The same folder holds `volume-command.json`
+when you set up the volume hook.
 
 The app launcher shows each app's icon. The TV sends no icons, so the app asks Apple's public
 app lookup service for the artwork of each bundle identifier, one time, and keeps the image in

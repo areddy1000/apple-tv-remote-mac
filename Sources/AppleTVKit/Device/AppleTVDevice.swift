@@ -37,6 +37,11 @@ public actor AppleTVDevice: RemoteController {
     private var airplay: AirPlayNowPlaying?
     private var airplayTask: Task<Void, Never>?
     private var airplayStarting = false
+
+    /// The user's volume commands, for televisions that give the Apple TV no volume route.
+    private let volumeHook = VolumeCommandRunner()
+    /// True when the Apple TV reports a volume route. Nil until it first says.
+    private var hasVolumeRoute: Bool?
     /// Set when the user declines the AirPlay PIN. Cleared on the next `connect`.
 
     public init(device: DiscoveredDevice, identity: CompanionIdentity, store: CredentialStore, pinProvider: @escaping PINProvider) {
@@ -73,19 +78,38 @@ public actor AppleTVDevice: RemoteController {
         guard let session else { return }
         switch command {
         case .button(let button, let down):
-            // Volume keys reach an HDMI-CEC television only through the MediaRemote link.
-            if button == .volumeUp || button == .volumeDown, let airplay, await airplay.isConnected {
-                do {
-                    try await airplay.sendVolumeKey(up: button == .volumeUp, down: down)
-                    return
-                } catch {
-                    ATVLog.airplay.error("volume key failed: \(String(describing: error), privacy: .public)")
-                }
+            if button == .volumeUp || button == .volumeDown,
+               await routeVolumeKey(up: button == .volumeUp, down: down) {
+                return
             }
             await session.hid(button, down: down)
         case .touch(let event):
             await session.touch(event)
         }
+    }
+
+    /// Sends a volume key the best way this television allows.
+    ///
+    /// The Apple TV carries volume to an HDMI-CEC television over the MediaRemote link.
+    /// A television that offers no volume route leaves the Apple TV on infrared, which no
+    /// network client can reach, so the user's own command runs instead.
+    /// Returns false when neither path exists, and the caller falls back to the Companion key.
+    private func routeVolumeKey(up: Bool, down: Bool) async -> Bool {
+        // Only take the MediaRemote path once the Apple TV has confirmed a volume route.
+        if hasVolumeRoute == true, let airplay, await airplay.isConnected {
+            do {
+                try await airplay.sendVolumeKey(up: up, down: down)
+                return true
+            } catch {
+                ATVLog.airplay.error("volume key failed: \(String(describing: error), privacy: .public)")
+            }
+        }
+        guard await volumeHook.isConfigured() else { return false }
+        // One step for each press. The key-up is swallowed so the step does not repeat.
+        guard down else { return true }
+        guard await volumeHook.step(up: up) else { return false }
+        if let level = await volumeHook.level() { eventsContinuation.yield(.volume(level)) }
+        return true
     }
 
     // MARK: Connection
@@ -266,13 +290,11 @@ public actor AppleTVDevice: RemoteController {
             eventsContinuation.yield(.power(power))
         case .mediaFlags(let flags):
             // The volume bit changes with the output. Read the level when it is on.
-            if flags & CompanionSession.volumeFlag != 0 {
-                Task { [weak self] in
-                    guard let self, let level = try? await self.volumeLevel() else { return }
-                    await self.publish(.volume(level))
-                }
-            } else {
-                eventsContinuation.yield(.volume(DeviceEvent.noVolumeLevel))
+            hasVolumeRoute = flags & CompanionSession.volumeFlag != 0
+            Task { [weak self] in
+                guard let self else { return }
+                let level = try? await self.volumeLevel()
+                await self.publish(.volume(level ?? DeviceEvent.noVolumeLevel))
             }
         }
     }
@@ -386,12 +408,18 @@ public actor AppleTVDevice: RemoteController {
         try await airplay.seek(to: seconds)
     }
 
+    /// The level the Apple TV reports, else the level the user's command prints.
     public func volumeLevel() async throws -> Double? {
-        try await liveSession().volumeLevel()
+        if let session, let native = try? await session.volumeLevel() { return native }
+        return await volumeHook.level()
     }
 
     public func setVolume(_ level: Double) async throws {
-        try await liveSession().setVolume(level)
+        if hasVolumeRoute == true, let session {
+            try await session.setVolume(level)
+            return
+        }
+        guard await volumeHook.setLevel(level) else { throw CompanionError.notConnected }
     }
 
     public func powerState() async throws -> PowerState {
