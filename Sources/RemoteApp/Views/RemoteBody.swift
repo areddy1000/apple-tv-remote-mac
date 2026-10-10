@@ -17,6 +17,9 @@ struct RemoteBody: View {
                 if let info = store.nowPlaying {
                     NowPlayingView(info: info, compact: compact)
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97)))
+                } else if compact {
+                    IdleCard()
+                        .transition(.opacity)
                 }
                 // The window bounds the clickpad. The menu bar panel does not, so it gets a fixed height.
                 TouchSurfaceView()

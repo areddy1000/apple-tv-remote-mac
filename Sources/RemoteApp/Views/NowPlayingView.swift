@@ -35,6 +35,9 @@ struct NowPlayingView: View {
             }
         }
         .padding(12)
+        // A live stream reports no length and so draws no progress bar. In the panel the
+        // card holds its height anyway, because the panel is sized by what it holds.
+        .frame(height: compact ? Tokens.compactCardHeight : nil, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Tokens.surfaceRaised)

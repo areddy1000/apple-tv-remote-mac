@@ -35,6 +35,9 @@ enum Tokens {
     static let buttonSpacing: CGFloat = 14
     static let touchCornerRadius: CGFloat = 28
     static let inset: CGFloat = 20
+    /// The now-playing card keeps this height in the menu bar panel, which sizes
+    /// itself to its content and must not change height as playback changes.
+    static let compactCardHeight: CGFloat = 96
 
     // MARK: Type
 

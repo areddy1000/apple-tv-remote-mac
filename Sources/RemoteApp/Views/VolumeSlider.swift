@@ -1,10 +1,14 @@
 import SwiftUI
 
 /// A thin volume slider. Tracks the pointer 1:1 and sends while you drag.
-/// It shows only when the TV reports a volume level.
+/// It shows only when a volume level is known.
 struct VolumeSlider: View {
     @Environment(DeviceStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Holds the slot open when no level is known. The menu bar panel takes its height
+    /// from what it holds, so it must not change when the output does.
+    var reserveSpace = false
 
     @State private var dragging = false
     @State private var hovering = false
@@ -64,6 +68,8 @@ struct VolumeSlider: View {
             .accessibilityLabel("Volume")
             .accessibilityValue("\(Int(level * 100)) percent")
             .transition(.opacity)
+        } else if reserveSpace {
+            Color.clear.frame(height: knob + 6)
         }
     }
 }

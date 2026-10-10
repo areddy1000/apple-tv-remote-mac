@@ -20,7 +20,7 @@ struct TransportBar: View {
                 RemoteButtonView(button: .siri, size: size)
                 PowerButtonView(size: size)
             }
-            VolumeSlider()
+            VolumeSlider(reserveSpace: compact)
         }
     }
 }
