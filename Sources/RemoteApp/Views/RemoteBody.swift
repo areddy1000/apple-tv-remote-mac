@@ -55,7 +55,7 @@ struct RemoteBody: View {
                     .onTapGesture {
                         withAnimation(reduceMotion ? Motion.reduced : Motion.panelClose) { store.paletteVisible = false }
                     }
-                AppLauncherPalette()
+                AppLauncherPalette(compact: compact)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
                     .padding(.top, 12)
                     .frame(maxHeight: .infinity, alignment: .top)

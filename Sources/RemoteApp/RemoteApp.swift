@@ -8,6 +8,7 @@ struct RemoteApp: App {
     static let windowTitle = "Apple TV Remote"
 
     @State private var store: DeviceStore
+    @State private var icons = AppIconStore()
     @State private var coordinator: AppCoordinator
     @State private var keyMonitor: KeyMonitor
     @State private var hotKey: HotKey?
@@ -35,6 +36,7 @@ struct RemoteApp: App {
             RemoteWindow()
                 .environment(store)
                 .environment(coordinator)
+                .environment(icons)
                 .containerBackground(.ultraThinMaterial, for: .window)
                 .onAppear {
                     keyMonitor.start()
@@ -53,6 +55,7 @@ struct RemoteApp: App {
             MenuBarPanel()
                 .environment(store)
                 .environment(coordinator)
+                .environment(icons)
         } label: {
             MenuBarLabel(store: store)
         }

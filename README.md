@@ -157,6 +157,10 @@ The `press` and `media` verbs take the same names as the command line tool.
 The pairing keys are in `~/Library/Application Support/AppleTVRemote/`. The files have mode
 0600. Delete the folder to remove every pairing.
 
+The app launcher shows each app's icon. The TV sends no icons, so the app asks Apple's public
+app lookup service for the artwork of each bundle identifier, one time, and keeps the image in
+the `icons` folder next to the pairing keys. Only the bundle identifier leaves your Mac.
+
 ## License
 
 MIT. The protocol facts come from the pyatv project. Thank you to its authors.
