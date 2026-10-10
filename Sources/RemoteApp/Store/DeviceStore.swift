@@ -22,7 +22,23 @@ final class DeviceStore {
     var apps: [LaunchableApp] = []
     /// The volume as 0...1. Nil when the current output reports no level.
     var volume: Double?
-    var lastError: String?
+    /// The last failure, shown under the remote. It clears by itself after a few seconds,
+    /// and a click clears it at once.
+    var lastError: String? {
+        didSet { scheduleErrorClear() }
+    }
+    private var errorClearTask: Task<Void, Never>?
+    private static let errorDisplayTime: Duration = .seconds(8)
+
+    private func scheduleErrorClear() {
+        errorClearTask?.cancel()
+        guard lastError != nil else { return }
+        errorClearTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.errorDisplayTime)
+            guard !Task.isCancelled else { return }
+            self?.lastError = nil
+        }
+    }
 
     // MARK: Pairing
 

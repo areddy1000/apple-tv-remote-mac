@@ -24,12 +24,22 @@ struct RemoteBody: View {
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6)))
                 }
                 if let error = store.lastError {
-                    Text(error)
-                        .font(Tokens.caption)
-                        .foregroundStyle(Tokens.danger)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                        .transition(.opacity)
+                    HStack(spacing: 6) {
+                        Text(error)
+                            .font(Tokens.caption)
+                            .foregroundStyle(Tokens.danger)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+                        Image(systemName: "xmark.circle.fill")
+                            .font(Tokens.caption)
+                            .foregroundStyle(Tokens.inkTertiary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { store.lastError = nil }
+                    .help("Click to dismiss")
+                    .accessibilityElement(children: .combine)
+                    .accessibilityHint("Click to dismiss")
+                    .transition(.opacity)
                 }
             }
             .padding(Tokens.inset)
