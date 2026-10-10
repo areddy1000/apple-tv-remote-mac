@@ -15,6 +15,8 @@ struct MenuBarLabel: View {
                     Image(systemName: "appletv.fill")
                 }
                 Text(truncated(info.title))
+                    // The same font the system clock uses in the menu bar.
+                    .font(Font(NSFont.menuBarFont(ofSize: 0)))
             }
             .accessibilityLabel("Apple TV Remote, now playing \(info.title)")
         } else {
