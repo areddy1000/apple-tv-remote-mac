@@ -113,6 +113,7 @@ use it, because the Apple TV allows one session for each paired client.
 .build/debug/atvctl state
 .build/debug/atvctl volume 40
 .build/debug/atvctl now-playing --watch 60
+.build/debug/atvctl now-playing --seek 600 --watch 5
 .build/debug/atvctl forget
 ```
 
@@ -130,6 +131,7 @@ Options:
 | `--wait <seconds>` | Discovery time before a command runs. The default is 2 |
 | `--hold <ms>` | Hold time for `press`. The default is 0 |
 | `--watch <seconds>` | How long `now-playing` listens. The default is 30 |
+| `--seek <seconds>` | With `now-playing`, move playback to this position first |
 | `--pin-file <path>` | Read the PIN from this file instead of the terminal |
 
 Run `atvctl` with no arguments to see this list.
