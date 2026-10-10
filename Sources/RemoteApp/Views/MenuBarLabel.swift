@@ -8,7 +8,7 @@ struct MenuBarLabel: View {
 
     var body: some View {
         if let info = store.nowPlaying {
-            HStack(spacing: 5) {
+            HStack(spacing: 9) {
                 if let thumbnail = thumbnail(info.artwork) {
                     Image(nsImage: thumbnail)
                 } else {
