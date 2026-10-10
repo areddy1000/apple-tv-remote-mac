@@ -12,9 +12,11 @@ struct AppIconView: View {
 
     private var radius: CGFloat { size * 0.22 }
 
+    private var image: NSImage? { icons.icon(for: app.bundleID) }
+
     var body: some View {
         Group {
-            if let image = icons.icon(for: app.bundleID) {
+            if let image {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -38,7 +40,8 @@ struct AppIconView: View {
         .frame(width: size, height: size)
         .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Tokens.edge, lineWidth: 0.5))
-        .animation(Motion.crossfade, value: icons.icon(for: app.bundleID) != nil)
+        .animation(Motion.crossfade, value: image != nil)
+        .task(id: app.bundleID) { await icons.load(app.bundleID) }
         .accessibilityHidden(true)
     }
 
