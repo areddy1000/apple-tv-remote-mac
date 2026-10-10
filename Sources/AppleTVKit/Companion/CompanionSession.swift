@@ -14,19 +14,15 @@ public enum CompanionError: Error, Sendable, Equatable {
 
 /// The identity the Mac presents to the Apple TV.
 public struct CompanionIdentity: Sendable {
-    /// The HAP pairing identifier for the Companion link.
+    /// The HAP pairing identifier. Both links use it.
     public var clientID: String
-    /// The HAP pairing identifier for the AirPlay link. The TV keeps one pairing per
-    /// identifier, so the two links must not share one.
-    public var airplayClientID: String
     public var name: String
     public var model: String
     /// 12 hex characters. A random, persisted, locally administered address.
     public var deviceID: String
 
-    public init(clientID: String, airplayClientID: String, name: String, model: String, deviceID: String) {
+    public init(clientID: String, name: String, model: String, deviceID: String) {
         self.clientID = clientID
-        self.airplayClientID = airplayClientID
         self.name = name
         self.model = model
         self.deviceID = deviceID

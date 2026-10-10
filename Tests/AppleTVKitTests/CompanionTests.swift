@@ -40,7 +40,7 @@ struct CompanionTests {
     }
 
     @Test func identityFormatsAddressWithColons() {
-        let identity = CompanionIdentity(clientID: "c", airplayClientID: "a", name: "Mac", model: "Mac1,1", deviceID: "7ad26a015a46")
+        let identity = CompanionIdentity(clientID: "c", name: "Mac", model: "Mac1,1", deviceID: "7ad26a015a46")
         #expect(identity.deviceAddress == "7A:D2:6A:01:5A:46")
     }
 }

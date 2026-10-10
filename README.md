@@ -35,10 +35,9 @@ release DMG. `scripts/test.sh` runs the unit tests.
 1. Open the app. The toolbar shows the first Apple TV it finds. Click the name to pick
    another one.
 2. The TV shows a four-digit code. Type the code into the sheet. Click **Pair**.
-3. The TV shows a second code a few seconds later. This code is for the now-playing link.
-   Type it in the same way.
 
-The app keeps both pairings. Later launches connect in less than one second with no code.
+That is the only code. The app keeps the pairing. Later launches connect in less than one
+second with no code.
 
 To pair again, choose **Forget This Apple TV** from the device menu. Then click the device
 name to connect.

@@ -357,7 +357,7 @@ import Testing
         let loaded = try await fresh.device(for: "dev-1")
         #expect(loaded?.name == "Living Room")
         #expect(loaded?.companion == creds)
-        #expect(loaded?.airplay == nil)
+        #expect(loaded?.macAddress == "02:00:00:00:00:01")
 
         let attributes = try FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent("credentials.json").path)
         #expect((attributes[.posixPermissions] as? Int) == 0o600)
@@ -366,15 +366,12 @@ import Testing
         #expect(try await fresh.device(for: "dev-1") == nil)
     }
 
-    @Test func clientIdentifierIsStablePerRole() throws {
+    @Test func clientIdentifierIsStable() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("atv-id-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let first = CredentialStore.clientID(directory: directory)
         #expect(CredentialStore.clientID(directory: directory) == first)
         #expect(UUID(uuidString: first) != nil)
-        let airplay = CredentialStore.clientID(role: "airplay", directory: directory)
-        #expect(airplay != first)
-        #expect(CredentialStore.clientID(role: "airplay", directory: directory) == airplay)
     }
 }
 

@@ -3,15 +3,14 @@ import Foundation
 /// Everything the app remembers about one paired Apple TV.
 public struct StoredDevice: Codable, Sendable, Equatable {
     public var name: String
+    /// The pairing record. Both links use it.
     public var companion: HAPCredentials?
-    public var airplay: HAPCredentials?
     /// The MAC address for Wake-on-LAN.
     public var macAddress: String?
 
-    public init(name: String, companion: HAPCredentials? = nil, airplay: HAPCredentials? = nil, macAddress: String? = nil) {
+    public init(name: String, companion: HAPCredentials? = nil, macAddress: String? = nil) {
         self.name = name
         self.companion = companion
-        self.airplay = airplay
         self.macAddress = macAddress
     }
 }
@@ -93,12 +92,9 @@ public actor CredentialStore {
 
     /// Returns a stable pairing identifier for this Mac.
     /// The first call makes a random UUID and stores it in a file.
-    /// Each `role` gets its own UUID. The TV keeps one pairing per UUID, so the
-    /// Companion pairing and the AirPlay pairing must not share one.
-    public static func clientID(role: String = "", directory: URL? = nil) -> String {
+    public static func clientID(directory: URL? = nil) -> String {
         let base = directory ?? defaultDirectory()
-        let file = role.isEmpty ? "client-id.txt" : "client-id-\(role).txt"
-        let url = base.appendingPathComponent(file)
+        let url = base.appendingPathComponent("client-id.txt")
         if let data = try? Data(contentsOf: url) {
             let value = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
             if !value.isEmpty { return value }

@@ -242,23 +242,16 @@ func run(_ command: String, _ arguments: [String], _ options: Options) async thr
         let store = CredentialStore()
         try? await store.load()
         let stored = try? await store.device(for: device.id)
+        guard let record = stored?.companion else { fail("Not paired yet. Run `atvctl press menu` first.") }
         let identity = CompanionIdentity.thisMac(clientID: CredentialStore.clientID())
         let tunnel = AirPlayNowPlaying(
             host: host,
             port: port,
-            clientID: identity.airplayClientID,
-            name: identity.name + " Now Playing",
+            clientID: identity.clientID,
+            name: identity.name,
             deviceAddress: identity.deviceAddress
-        ) { title in
-            await readPIN(title: title, pinFile: options.pinFile)
-        }
-        let credentials = try await tunnel.connect(credentials: stored?.airplay)
-        if stored?.airplay == nil {
-            var record = stored ?? StoredDevice(name: device.name)
-            record.airplay = credentials
-            try? await store.save(record, for: device.id)
-            print("paired")
-        }
+        )
+        try await tunnel.connect(credentials: record)
         print("listening for \(Int(options.watch)) s")
         let watcher = Task {
             for await info in tunnel.nowPlaying {

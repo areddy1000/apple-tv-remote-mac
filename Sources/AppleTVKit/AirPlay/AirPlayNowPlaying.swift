@@ -1,7 +1,8 @@
 import Foundation
 
 /// Now-playing for one Apple TV over the AirPlay 2 MRP tunnel.
-/// Pairs on first use, then verifies, opens the channels and runs MRP.
+/// It verifies with the Companion pairing key, opens the channels and runs MRP.
+/// The TV keeps one pairing store for both services, so one PIN serves both links.
 public actor AirPlayNowPlaying {
     private let host: String
     private let port: UInt16
@@ -9,47 +10,30 @@ public actor AirPlayNowPlaying {
     private let name: String
     /// The address this Mac presents to the TV, as colon-separated hex.
     private let deviceAddress: String
-    private let pin: @Sendable (String) async -> String?
     private var session: AP2Session?
     private var mrp: MRPSession?
     private var forwardTask: Task<Void, Never>?
     public nonisolated let nowPlaying: AsyncStream<NowPlaying?>
     private let nowPlayingContinuation: AsyncStream<NowPlaying?>.Continuation
 
-    public init(
-        host: String,
-        port: UInt16,
-        clientID: String,
-        name: String,
-        deviceAddress: String,
-        pin: @escaping @Sendable (String) async -> String?
-    ) {
+    public init(host: String, port: UInt16, clientID: String, name: String, deviceAddress: String) {
         self.host = host
         self.port = port
         self.clientID = clientID
         self.name = name
         self.deviceAddress = deviceAddress
-        self.pin = pin
         let (stream, continuation) = AsyncStream.makeStream(of: NowPlaying?.self, bufferingPolicy: .bufferingNewest(1))
         self.nowPlaying = stream
         self.nowPlayingContinuation = continuation
     }
 
-    /// Connects. Pairs with a PIN when `credentials` is nil. Returns the credentials in use.
-    public func connect(credentials: HAPCredentials?) async throws -> HAPCredentials {
+    /// Verifies with the pairing key, then opens the tunnel.
+    public func connect(credentials: HAPCredentials) async throws {
         await close()
         let identity = AirPlayIdentity(name: name, deviceID: deviceAddress, macAddress: deviceAddress)
         let session = AP2Session(host: host, port: port, identity: identity)
         try await session.openControl()
-        var inUse = credentials
-        if inUse == nil {
-            let connection = await session.controlConnection
-            inUse = try await AirPlayAuth.pairSetup(connection: connection, clientID: clientID, name: name) { [pin, name] in
-                await pin("Pair AirPlay with \(name)")
-            }
-        }
-        guard let active = inUse else { throw CompanionError.pairingCancelled }
-        try await session.verify(credentials: active)
+        try await session.verify(credentials: credentials)
         try await session.setupRemoteControl()
         guard let channel = await session.dataChannel else { throw AP2Error.badResponse("no data channel") }
         let mrp = MRPSession(channel: channel, name: name, clientID: clientID)
@@ -63,7 +47,6 @@ public actor AirPlayNowPlaying {
             }
             await self?.forward(nil)
         }
-        return active
     }
 
     private func forward(_ value: NowPlaying?) {
@@ -75,7 +58,6 @@ public actor AirPlayNowPlaying {
         try await mrp.send(command)
     }
 
-    /// True once the MRP session runs.
     public var isConnected: Bool { mrp != nil }
 
     public func close() async {

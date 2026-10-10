@@ -38,7 +38,6 @@ public actor AppleTVDevice: RemoteController {
     private var airplayTask: Task<Void, Never>?
     private var airplayStarting = false
     /// Set when the user declines the AirPlay PIN. Cleared on the next `connect`.
-    private var airplayDeclined = false
 
     public init(device: DiscoveredDevice, identity: CompanionIdentity, store: CredentialStore, pinProvider: @escaping PINProvider) {
         self.id = device.id
@@ -84,7 +83,6 @@ public actor AppleTVDevice: RemoteController {
 
     public func connect() async {
         wantsConnection = true
-        airplayDeclined = false
         startCommandLoop()
         guard connectLoop == nil else { return }
         connectGeneration += 1
@@ -285,7 +283,7 @@ public actor AppleTVDevice: RemoteController {
 
     /// Opens the AirPlay tunnel for now-playing. Pairs with a second PIN on first use.
     private func startAirPlay() async {
-        guard airplay == nil, !airplayStarting, !airplayDeclined else { return }
+        guard airplay == nil, !airplayStarting else { return }
         guard let endpoint = device.airplayEndpoint else {
             ATVLog.airplay.info("no AirPlay endpoint yet for \(self.device.name, privacy: .public)")
             return
@@ -295,34 +293,16 @@ public actor AppleTVDevice: RemoteController {
         ATVLog.airplay.info("opening now-playing tunnel")
         do {
             let (host, port) = try await resolveWithTimeout(endpoint)
-            let stored = try? await store.device(for: id)
+            // The Companion record serves this link too. The TV holds one record per client.
+            guard let record = try? await store.device(for: id)?.companion else { return }
             let tunnel = AirPlayNowPlaying(
                 host: host,
                 port: port,
-                clientID: identity.airplayClientID,
-                // A name of its own. The TV lists each pairing by name.
-                name: identity.name + " Now Playing",
-                deviceAddress: identity.deviceAddress,
-                pin: { [pinProvider] title in await pinProvider(title) }
+                clientID: identity.clientID,
+                name: identity.name,
+                deviceAddress: identity.deviceAddress
             )
-            var current = stored?.airplay
-            if current == nil { set(.awaitingPIN) }
-            let credentials: HAPCredentials
-            do {
-                credentials = try await tunnel.connect(credentials: current)
-            } catch where current != nil {
-                // The TV rejected the stored key. Pair again with a PIN.
-                ATVLog.airplay.info("stored now-playing key rejected, pairing again")
-                current = nil
-                set(.awaitingPIN)
-                credentials = try await tunnel.connect(credentials: nil)
-            }
-            if current == nil {
-                var record = stored ?? StoredDevice(name: device.name)
-                record.airplay = credentials
-                try? await store.save(record, for: id)
-            }
-            if state == .awaitingPIN { set(.connected) }
+            try await tunnel.connect(credentials: record)
             airplay = tunnel
             airplayTask = Task { [weak self] in
                 for await info in tunnel.nowPlaying {
@@ -331,12 +311,8 @@ public actor AppleTVDevice: RemoteController {
                 }
             }
             ATVLog.airplay.info("now-playing tunnel open")
-        } catch CompanionError.pairingCancelled {
-            airplayDeclined = true
-            if state == .awaitingPIN { set(.connected) }
         } catch {
             ATVLog.airplay.error("now-playing failed: \(String(describing: error), privacy: .public)")
-            if state == .awaitingPIN { set(.connected) }
         }
     }
 
@@ -449,7 +425,6 @@ extension CompanionIdentity {
         }
         return CompanionIdentity(
             clientID: clientID + "-companion",
-            airplayClientID: CredentialStore.clientID(role: "airplay"),
             name: Host.current().localizedName ?? "Mac",
             model: hardwareModel(),
             deviceID: deviceID
