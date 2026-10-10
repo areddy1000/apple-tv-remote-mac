@@ -177,6 +177,32 @@ Every field is optional. `up` and `down` run for one press of the volume keys. `
 when you drag the slider, with `{level}` replaced by a whole number from 0 to 100. `get`
 prints the level as a whole number from 0 to 100, and the slider appears when it is present.
 
+### A helper that stays running
+
+A command that opens a fresh connection on every press feels slow, because the connection
+costs far more than the command. Televisions that need a session, such as LG and Samsung,
+are better served by a helper the app keeps running:
+
+```json
+{ "daemon": "my-tv-helper serve" }
+```
+
+The app starts it once and holds it. The helper reads one request per line on its standard
+input and answers with exactly one line on its standard output:
+
+| Request | Answer |
+| --- | --- |
+| `up` | `ok` |
+| `down` | `ok` |
+| `set 37` | `ok` |
+| `get` | a whole number, 0 to 100 |
+| anything that failed | `err <reason>` |
+
+The helper exits when its standard input closes, which is how it learns the app has gone.
+The app starts it again if it stops on its own. This field wins over the four above.
+
+On an LG this takes a press from about one second to about sixty milliseconds.
+
 Each value is a shell command run with your own account, the same trust as a shell alias.
 The app never writes this file. It re-reads it when you change it, so there is no restart.
 The hook runs only when the Apple TV reports no volume route, so a later soundbar takes
@@ -204,7 +230,8 @@ in a terminal, then put it in the file.
 ```
 
 **LG webOS**, with [aiowebostv](https://github.com/home-assistant-libs/aiowebostv). It reports
-a level, so the slider works. The television shows a prompt the first time you connect.
+a level, so the slider works. The television shows a prompt the first time you connect. Use
+the `daemon` field, because each connection costs about a second.
 
 **Samsung Tizen**, with [samsungtvws](https://github.com/xchwarze/samsung-tv-ws-api). Keys
 only, no level.

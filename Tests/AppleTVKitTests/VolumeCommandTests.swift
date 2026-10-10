@@ -102,6 +102,45 @@ struct VolumeCommandTests {
         }
     }
 
+    /// A shell loop stands in for a real helper. It answers one line per request.
+    private static let shellHelper =
+        "while read request; do case \\\"$request\\\" in "
+        + "get) echo 55;; set*) echo ok;; up|down) echo ok;; *) echo 'err what';; esac; done"
+
+    @Test func usesALongRunningHelper() async throws {
+        try await withHook(#"{"daemon":"\#(Self.shellHelper)"}"#) { runner, _ in
+            #expect(await runner.isConfigured())
+            #expect(await runner.reportsLevel())
+            let level = try #require(await runner.level())
+            #expect(abs(level - 0.55) < 0.0001)
+            #expect(await runner.step(up: true))
+            #expect(await runner.step(up: false))
+            #expect(await runner.setLevel(0.2))
+            // The same helper serves every request, so it still answers.
+            #expect(await runner.level() != nil)
+            await runner.stop()
+        }
+    }
+
+    @Test func treatsAnErrorAnswerAsAFailure() async throws {
+        let helper = "while read request; do echo 'err nope'; done"
+        try await withHook(#"{"daemon":"\#(helper)"}"#) { runner, _ in
+            #expect(await !runner.step(up: true))
+            #expect(await runner.level() == nil)
+            await runner.stop()
+        }
+    }
+
+    @Test func startsTheHelperAgainAfterItExits() async throws {
+        // This helper answers one request and then leaves.
+        let helper = "read request; echo 55"
+        try await withHook(#"{"daemon":"\#(helper)"}"#) { runner, _ in
+            #expect(await runner.level() != nil)
+            #expect(await runner.level() != nil)
+            await runner.stop()
+        }
+    }
+
     @Test func reportsAFailedCommandWithoutThrowing() async throws {
         try await withHook(#"{"up":"exit 3","get":"exit 3"}"#) { runner, _ in
             #expect(await !runner.step(up: true))

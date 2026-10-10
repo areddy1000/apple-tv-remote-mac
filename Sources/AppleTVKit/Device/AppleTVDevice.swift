@@ -131,6 +131,7 @@ public actor AppleTVDevice: RemoteController {
         connectLoop = nil
         await dropSession()
         await stopAirPlay()
+        await volumeHook.stop()
         set(.idle)
     }
 
