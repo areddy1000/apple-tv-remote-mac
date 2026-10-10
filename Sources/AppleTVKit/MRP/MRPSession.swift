@@ -343,6 +343,16 @@ public actor MRPSession {
         _ = try await request(data, identifier: nil, timeout: .seconds(5))
     }
 
+    /// Moves playback to an absolute position in seconds.
+    public func seek(to seconds: Double) async throws {
+        let data = MRPMessageBuilder.sendCommand(
+            identifier: UUID().uuidString,
+            command: .seekToPlaybackPosition,
+            position: max(0, seconds)
+        )
+        _ = try await request(data, identifier: nil, timeout: .seconds(5))
+    }
+
     public func close() async {
         heartbeat?.cancel()
         reader?.cancel()

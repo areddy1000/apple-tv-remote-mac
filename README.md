@@ -58,7 +58,8 @@ name to connect.
 
 The now-playing card appears at the top while media plays. It shows the artwork, the title,
 the app and a progress bar. The card has pause, play, skip back and skip forward buttons.
-Each skip moves ten seconds.
+Each skip moves ten seconds. Drag anywhere on the progress bar to seek. The time labels follow
+the pointer while you drag, and playback moves when you let go.
 
 A volume slider appears below the buttons when the TV reports a volume level. A television
 on HDMI-CEC reports no level, so the slider stays hidden. AirPlay speakers and HomePods

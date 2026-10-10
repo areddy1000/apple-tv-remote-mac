@@ -58,6 +58,12 @@ public actor AirPlayNowPlaying {
         try await mrp.send(command)
     }
 
+    /// Moves playback to an absolute position in seconds.
+    public func seek(to seconds: Double) async throws {
+        guard let mrp else { throw MRPError.closed }
+        try await mrp.seek(to: seconds)
+    }
+
     public var isConnected: Bool { mrp != nil }
 
     public func close() async {

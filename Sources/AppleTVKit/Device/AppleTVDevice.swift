@@ -371,6 +371,12 @@ public actor AppleTVDevice: RemoteController {
         }
     }
 
+    /// Seeks over the now-playing link. Only that link reports a position.
+    public func seek(to seconds: Double) async throws {
+        guard let airplay, await airplay.isConnected else { throw CompanionError.notConnected }
+        try await airplay.seek(to: seconds)
+    }
+
     public func volumeLevel() async throws -> Double? {
         try await liveSession().volumeLevel()
     }

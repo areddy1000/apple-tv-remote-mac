@@ -48,6 +48,10 @@ public final class MockController: RemoteController, Sendable {
         ATVLog.input.info("mock media \(command.rawValue, privacy: .public)")
     }
 
+    public func seek(to seconds: Double) async throws {
+        ATVLog.input.info("mock seek to \(Int(seconds)) s")
+    }
+
     public func volumeLevel() async throws -> Double? { 0.42 }
 
     public func setVolume(_ level: Double) async throws {

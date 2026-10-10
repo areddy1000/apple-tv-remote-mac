@@ -10,6 +10,9 @@ struct NowPlayingView: View {
     let info: NowPlaying
     var compact = false
 
+    /// The position under the pointer while you drag the bar, as 0...1.
+    @State private var scrubFraction: Double?
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 12) {
@@ -79,24 +82,21 @@ struct NowPlayingView: View {
 
     private func progress(duration: Double) -> some View {
         TimelineView(.periodic(from: .now, by: info.isPlaying ? 0.5 : 60)) { context in
-            let elapsed = info.elapsed(at: context.date)
-            let fraction = max(0, min(1, elapsed / duration))
+            let live = info.elapsed(at: context.date)
+            // While you drag, the bar and the labels follow the pointer, not the player.
+            let elapsed = scrubFraction.map { $0 * duration } ?? live
             VStack(spacing: 4) {
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Tokens.surfaceHover)
-                        Capsule().fill(Tokens.ink.opacity(0.7))
-                            .frame(width: max(3, proxy.size.width * fraction))
-                    }
+                Scrubber(fraction: max(0, min(1, elapsed / duration)), scrubbing: $scrubFraction) { fraction in
+                    store.seek(to: fraction * duration)
                 }
-                .frame(height: 3)
                 HStack {
                     Text(timeString(elapsed))
                     Spacer()
                     Text("−" + timeString(duration - elapsed))
                 }
                 .font(Tokens.time)
-                .foregroundStyle(Tokens.inkTertiary)
+                .foregroundStyle(scrubFraction == nil ? Tokens.inkTertiary : Tokens.inkSecondary)
+                .animation(Motion.hover, value: scrubFraction == nil)
             }
         }
     }

@@ -265,6 +265,8 @@ public protocol RemoteController: AnyObject, Sendable {
     func launchableApps() async throws -> [LaunchableApp]
     func launch(bundleID: String) async throws
     func media(_ command: MediaCommand) async throws
+    /// Moves playback to an absolute position in seconds.
+    func seek(to seconds: Double) async throws
     /// The volume as 0...1, or nil when the TV has no volume control.
     func volumeLevel() async throws -> Double?
     func setVolume(_ level: Double) async throws

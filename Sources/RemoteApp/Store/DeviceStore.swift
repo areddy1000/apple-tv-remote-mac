@@ -212,6 +212,16 @@ final class DeviceStore {
         perform { try await $0.media(command) }
     }
 
+    /// Seeks to `seconds`. The bar moves at once; the TV confirms a moment later.
+    func seek(to seconds: Double) {
+        if var info = nowPlaying {
+            info.elapsed = seconds
+            info.elapsedAt = .now
+            nowPlaying = info
+        }
+        perform { try await $0.seek(to: seconds) }
+    }
+
     func typeText(_ text: String) {
         perform { try await $0.typeText(text) }
     }

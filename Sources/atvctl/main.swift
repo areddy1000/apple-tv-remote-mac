@@ -29,6 +29,7 @@ options:
   --wait <seconds>            Discovery time before a command runs. Default 2.
   --hold <ms>                 Hold time for press. Default 0.
   --watch <seconds>           How long now-playing listens. Default 30.
+  --seek <seconds>            With now-playing: move playback to this position first.
   --pin-file <path>           Read the PIN from this file instead of the terminal.
 """
 
@@ -38,6 +39,7 @@ struct Options {
     var hold: Int = 0
     var watch: Double = 30
     var pinFile: String?
+    var seek: Double?
     var positional: [String] = []
 
     static func parse(_ args: [String]) -> Options {
@@ -50,6 +52,7 @@ struct Options {
             case "--hold": options.hold = Int(iterator.next() ?? "") ?? options.hold
             case "--watch": options.watch = Double(iterator.next() ?? "") ?? options.watch
             case "--pin-file": options.pinFile = iterator.next()
+            case "--seek": options.seek = Double(iterator.next() ?? "")
             default: options.positional.append(arg)
             }
         }
@@ -252,6 +255,10 @@ func run(_ command: String, _ arguments: [String], _ options: Options) async thr
             deviceAddress: identity.deviceAddress
         )
         try await tunnel.connect(credentials: record)
+        if let seek = options.seek {
+            try await tunnel.seek(to: seek)
+            print("seek to \(Int(seek)) s sent")
+        }
         print("listening for \(Int(options.watch)) s")
         let watcher = Task {
             for await info in tunnel.nowPlaying {
