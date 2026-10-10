@@ -408,7 +408,7 @@ public actor AppleTVDevice: RemoteController {
 extension CompanionIdentity {
     /// The identity for this Mac. The address persists in UserDefaults.
     /// - Parameter clientID: The base pairing identifier from `CredentialStore.clientID()`.
-    ///   The Companion link uses it with a suffix. The AirPlay link uses its own stored UUID.
+    ///   Both links use it. The TV keeps one pairing store for both services.
     public static func thisMac(clientID: String) -> CompanionIdentity {
         let defaults = UserDefaults.standard
         let key = "atv.deviceID"
@@ -424,7 +424,7 @@ extension CompanionIdentity {
             defaults.set(deviceID, forKey: key)
         }
         return CompanionIdentity(
-            clientID: clientID + "-companion",
+            clientID: clientID,
             name: Host.current().localizedName ?? "Mac",
             model: hardwareModel(),
             deviceID: deviceID

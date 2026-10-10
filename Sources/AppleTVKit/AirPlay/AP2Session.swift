@@ -38,8 +38,8 @@ public enum AP2Error: Error, Sendable {
 
 /// One AirPlay 2 remote-control session: control channel, event channel, data channel.
 public actor AP2Session {
-    public let host: String
-    public let port: UInt16
+    private let host: String
+    private let port: UInt16
     private let identity: AirPlayIdentity
     private let control: AirPlayHTTPConnection
     private var verifier: HAPPairVerify?
@@ -63,9 +63,6 @@ public actor AP2Session {
         self.identity = identity
         self.control = AirPlayHTTPConnection(host: host, port: port)
     }
-
-    /// The control connection, for pairing before `open`.
-    public var controlConnection: AirPlayHTTPConnection { control }
 
     public func openControl() async throws {
         ATVLog.airplay.info("control channel opening \(self.host, privacy: .public):\(self.port)")
