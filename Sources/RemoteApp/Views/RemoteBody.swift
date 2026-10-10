@@ -16,8 +16,10 @@ struct RemoteBody: View {
                     NowPlayingView(info: info, compact: compact)
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97)))
                 }
+                // The window bounds the clickpad. The menu bar panel does not, so it gets a fixed height.
                 TouchSurfaceView()
-                    .frame(minHeight: compact ? 180 : 230)
+                    .frame(height: compact ? 220 : nil)
+                    .frame(minHeight: compact ? nil : 230)
                 TransportBar(compact: compact)
                 if store.keyboardVisible {
                     KeyboardBar()
