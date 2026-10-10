@@ -30,6 +30,7 @@ options:
   --hold <ms>                 Hold time for press. Default 0.
   --watch <seconds>           How long now-playing listens. Default 30.
   --seek <seconds>            With now-playing: move playback to this position first.
+  --key <volume-up|volume-down>  With now-playing: send a volume key over the media link.
   --pin-file <path>           Read the PIN from this file instead of the terminal.
 """
 
@@ -40,6 +41,7 @@ struct Options {
     var watch: Double = 30
     var pinFile: String?
     var seek: Double?
+    var key: String?
     var positional: [String] = []
 
     static func parse(_ args: [String]) -> Options {
@@ -53,6 +55,7 @@ struct Options {
             case "--watch": options.watch = Double(iterator.next() ?? "") ?? options.watch
             case "--pin-file": options.pinFile = iterator.next()
             case "--seek": options.seek = Double(iterator.next() ?? "")
+            case "--key": options.key = iterator.next()
             default: options.positional.append(arg)
             }
         }
@@ -258,6 +261,12 @@ func run(_ command: String, _ arguments: [String], _ options: Options) async thr
         if let seek = options.seek {
             try await tunnel.seek(to: seek)
             print("seek to \(Int(seek)) s sent")
+        }
+        if let key = options.key {
+            guard key == "volume-up" || key == "volume-down" else { usageError() }
+            try await tunnel.sendVolumeKey(up: key == "volume-up", down: true)
+            try await tunnel.sendVolumeKey(up: key == "volume-up", down: false)
+            print("\(key) sent over the media link")
         }
         print("listening for \(Int(options.watch)) s")
         let watcher = Task {

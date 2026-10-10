@@ -343,6 +343,19 @@ public actor MRPSession {
         _ = try await request(data, identifier: nil, timeout: .seconds(5))
     }
 
+    /// Sends one HID key event. Volume keys reach the television this way over HDMI-CEC.
+    /// - Parameters:
+    ///   - usagePage: HID usage page. 12 is the consumer page.
+    ///   - usage: HID usage. 0xE9 is volume up, 0xEA is volume down.
+    public func sendKey(usagePage: UInt16, usage: UInt16, down: Bool) async throws {
+        let data = MRPMessageBuilder.hidEvent(usagePage: usagePage, usage: usage, down: down)
+        try await channel.send(protobuf: data)
+        if !down {
+            // pyatv follows a key-up with a generic exchange. It acts as a flush.
+            _ = try await request(MRPMessageBuilder.genericMessage(identifier: UUID().uuidString), identifier: nil, timeout: .seconds(5))
+        }
+    }
+
     /// Moves playback to an absolute position in seconds.
     public func seek(to seconds: Double) async throws {
         let data = MRPMessageBuilder.sendCommand(

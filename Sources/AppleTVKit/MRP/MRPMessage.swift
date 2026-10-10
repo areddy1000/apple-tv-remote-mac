@@ -10,6 +10,7 @@ public enum MRPMessageType: Int, Sendable {
     case getKeyboardSession = 24
     case playbackQueueRequest = 32
     case setConnectionState = 38
+    case sendHIDEvent = 8
     case genericMessage = 42
     case setNowPlayingClient = 46
     case setNowPlayingPlayer = 47
@@ -30,6 +31,7 @@ enum MRPExtension {
     static let playbackQueueRequest = 37
     static let setConnectionState = 42
     static let genericMessage = 46
+    static let sendHIDEvent = 13
     static let setNowPlayingClient = 50
     static let setNowPlayingPlayer = 51
     static let removeClient = 57
@@ -166,6 +168,21 @@ public enum MRPMessageBuilder {
 
     public static func genericMessage(identifier: String) -> Data {
         var writer = envelope(.genericMessage, identifier: identifier)
+        return finish(&writer)
+    }
+
+    /// A HID key event. The blob layout comes from pyatv. The TV ignores the time stamp.
+    public static func hidEvent(usagePage: UInt16, usage: UInt16, down: Bool) -> Data {
+        var blob = Data(hexString: "438922cf08020000")!
+        blob.append(Data(hexString: "0000000000000000010000000000000002000000200000000300000001000000000000")!)
+        for value in [usagePage, usage, UInt16(down ? 1 : 0)] {
+            blob.append(contentsOf: [UInt8(value >> 8), UInt8(value & 0xFF)])
+        }
+        blob.append(Data(hexString: "0000000000000001000000")!)
+        var inner = ProtobufWriter()
+        inner.bytes(field: 1, value: blob)
+        var writer = envelope(.sendHIDEvent, identifier: nil)
+        writer.message(field: MRPExtension.sendHIDEvent, writer: inner)
         return finish(&writer)
     }
 

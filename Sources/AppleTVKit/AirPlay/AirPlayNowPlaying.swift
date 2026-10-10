@@ -58,6 +58,12 @@ public actor AirPlayNowPlaying {
         try await mrp.send(command)
     }
 
+    /// Sends a volume key through the MediaRemote link. This is the path HDMI-CEC listens to.
+    public func sendVolumeKey(up: Bool, down: Bool) async throws {
+        guard let mrp else { throw MRPError.closed }
+        try await mrp.sendKey(usagePage: 12, usage: up ? 0xE9 : 0xEA, down: down)
+    }
+
     /// Moves playback to an absolute position in seconds.
     public func seek(to seconds: Double) async throws {
         guard let mrp else { throw MRPError.closed }

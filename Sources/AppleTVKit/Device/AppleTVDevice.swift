@@ -73,6 +73,15 @@ public actor AppleTVDevice: RemoteController {
         guard let session else { return }
         switch command {
         case .button(let button, let down):
+            // Volume keys reach an HDMI-CEC television only through the MediaRemote link.
+            if button == .volumeUp || button == .volumeDown, let airplay, await airplay.isConnected {
+                do {
+                    try await airplay.sendVolumeKey(up: button == .volumeUp, down: down)
+                    return
+                } catch {
+                    ATVLog.airplay.error("volume key failed: \(String(describing: error), privacy: .public)")
+                }
+            }
             await session.hid(button, down: down)
         case .touch(let event):
             await session.touch(event)
