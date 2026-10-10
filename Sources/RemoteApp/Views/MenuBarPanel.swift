@@ -5,6 +5,7 @@ import SwiftUI
 struct MenuBarPanel: View {
     @Environment(DeviceStore.self) private var store
     @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
@@ -15,6 +16,8 @@ struct MenuBarPanel: View {
                 Button {
                     openWindow(id: RemoteApp.mainWindowID)
                     NSApp.activate(ignoringOtherApps: true)
+                    // One remote at a time. The panel folds back into the menu bar.
+                    dismiss()
                 } label: {
                     Label("Open Window", systemImage: "macwindow")
                         .labelStyle(.iconOnly)
