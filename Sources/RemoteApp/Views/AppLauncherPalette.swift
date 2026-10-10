@@ -71,9 +71,12 @@ struct AppLauncherPalette: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Tokens.edge, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 24, y: 10)
-        .onAppear {
-            focused = true
+        .task {
             if store.apps.isEmpty { store.loadApps() }
+            // The field joins the responder chain only after the first layout pass,
+            // so asking for focus during appear is too early and is dropped.
+            try? await Task.sleep(for: .milliseconds(40))
+            focused = true
         }
         .onChange(of: query) { _, _ in selection = 0 }
     }

@@ -15,11 +15,16 @@ struct RemoteBody: View {
         ZStack(alignment: .top) {
             VStack(spacing: 16) {
                 if let info = store.nowPlaying {
+                    // The card slides in from the top and pushes the remote down.
                     NowPlayingView(info: info, compact: compact)
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.97)))
-                } else if compact {
-                    IdleCard()
-                        .transition(.opacity)
+                        .transition(
+                            reduceMotion
+                                ? .opacity
+                                : .asymmetric(
+                                    insertion: .move(edge: .top).combined(with: .opacity),
+                                    removal: .opacity
+                                )
+                        )
                 }
                 // The window bounds the clickpad. The menu bar panel does not, so it gets a fixed height.
                 TouchSurfaceView()
