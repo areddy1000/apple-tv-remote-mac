@@ -10,7 +10,9 @@ struct RemoteBody: View {
     var compact = false
 
     var body: some View {
-        ZStack {
+        // The remote sets the size. The palette floats over it from the top edge.
+        // Nothing here asks for more height, so the menu bar panel keeps its size.
+        ZStack(alignment: .top) {
             VStack(spacing: 16) {
                 if let info = store.nowPlaying {
                     NowPlayingView(info: info, compact: compact)
@@ -58,7 +60,6 @@ struct RemoteBody: View {
                 AppLauncherPalette(compact: compact)
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
                     .padding(.top, 12)
-                    .frame(maxHeight: .infinity, alignment: .top)
             }
         }
         .animation(reduceMotion ? Motion.reduced : (store.paletteVisible ? Motion.panelOpen : Motion.panelClose), value: store.paletteVisible)
