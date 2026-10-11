@@ -4,6 +4,7 @@ import SwiftUI
 /// Command-K palette. Type to filter, Return to launch, Escape to close.
 struct AppLauncherPalette: View {
     @Environment(DeviceStore.self) private var store
+    @Environment(AppIconStore.self) private var icons
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var query = ""
@@ -76,6 +77,8 @@ struct AppLauncherPalette: View {
             focused = true
         }
         .onChange(of: query) { _, _ in selection = 0 }
+        // The icons stay on disk. Memory holds them only while the palette is open.
+        .onDisappear { icons.releaseIcons() }
     }
 
     private func row(_ app: LaunchableApp, selected: Bool) -> some View {

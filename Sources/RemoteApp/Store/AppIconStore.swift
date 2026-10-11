@@ -22,6 +22,12 @@ final class AppIconStore {
         directory = support.appendingPathComponent("AppleTVRemote/icons", isDirectory: true)
     }
 
+    /// Lets go of the decoded icons. The palette calls this when it closes.
+    /// The files stay on disk, so the next open reads them again with no network request.
+    func releaseIcons() {
+        icons.removeAll()
+    }
+
     /// The icon when it is already known.
     /// This only reads, so a view may call it while it draws itself.
     func icon(for bundleID: String) -> NSImage? { icons[bundleID] }
@@ -49,14 +55,14 @@ final class AppIconStore {
         await Self.write(data, to: fileURL, in: directory)
     }
 
-    private static func read(_ url: URL) async -> NSImage? {
+    private nonisolated static func read(_ url: URL) async -> NSImage? {
         await Task.detached(priority: .utility) {
             guard let data = try? Data(contentsOf: url) else { return nil }
             return NSImage(data: data)
         }.value
     }
 
-    private static func write(_ data: Data, to url: URL, in directory: URL) async {
+    private nonisolated static func write(_ data: Data, to url: URL, in directory: URL) async {
         await Task.detached(priority: .utility) {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try? data.write(to: url, options: .atomic)
@@ -64,7 +70,8 @@ final class AppIconStore {
     }
 
     /// Asks the lookup service for the artwork address. Nil when the app is not in the store.
-    private static func artworkURL(for bundleID: String) async -> URL? {
+    /// It is not isolated, so the JSON work runs off the main actor.
+    private nonisolated static func artworkURL(for bundleID: String) async -> URL? {
         var components = URLComponents(string: "https://itunes.apple.com/lookup")
         components?.queryItems = [URLQueryItem(name: "bundleId", value: bundleID)]
         guard let url = components?.url,
