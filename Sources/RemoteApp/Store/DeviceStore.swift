@@ -1,3 +1,4 @@
+import AppKit
 import AppleTVKit
 import Foundation
 import Observation
@@ -30,7 +31,15 @@ final class DeviceStore {
 
     var connection: ConnectionState = .idle
     var power: PowerState = .unknown
-    var nowPlaying: NowPlaying?
+    var nowPlaying: NowPlaying? {
+        didSet { updateArtwork() }
+    }
+    /// The artwork for the menu bar, 16 points with a clear margin on the right.
+    private(set) var artworkThumbnail: NSImage?
+    /// The artwork for the now-playing card, 40 points.
+    private(set) var artworkImage: NSImage?
+    /// The artwork data that the two images show.
+    private var artworkSource: Data?
     var textInput: TextInputState = .inactive
     var apps: [LaunchableApp] = []
     /// The volume as 0...1. Nil when the current output reports no level.
@@ -296,6 +305,23 @@ final class DeviceStore {
             if power != .asleep { refreshVolume() }
         }
         startPolling()
+    }
+
+    // MARK: Artwork
+
+    /// Draws the artwork for the menu bar and the card. It runs only when the artwork changes.
+    private func updateArtwork() {
+        let data = nowPlaying?.artwork
+        guard data != artworkSource else { return }
+        artworkSource = data
+        guard let data else {
+            artworkThumbnail = nil
+            artworkImage = nil
+            return
+        }
+        // The status item ignores view spacing, so the gap to the title is a clear margin.
+        artworkThumbnail = ArtworkRenderer.render(data, side: 16, cornerRadius: 3, trailingMargin: 6)
+        artworkImage = ArtworkRenderer.render(data, side: 40, cornerRadius: 0)
     }
 
     // MARK: Input

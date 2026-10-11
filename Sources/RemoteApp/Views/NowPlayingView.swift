@@ -56,7 +56,8 @@ struct NowPlayingView: View {
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Tokens.surfaceHover)
-            if let data = info.artwork, let image = NSImage(data: data) {
+            // The store draws the image once when the artwork changes, not on each update.
+            if let image = store.artworkImage {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
@@ -69,7 +70,7 @@ struct NowPlayingView: View {
         }
         .frame(width: side, height: side)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .animation(Motion.crossfade, value: info.artwork)
+        .animation(Motion.crossfade, value: store.artworkImage)
     }
 
     private var transport: some View {
