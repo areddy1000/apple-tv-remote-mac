@@ -147,4 +147,29 @@ struct VolumeCommandTests {
             #expect(await runner.level() == nil)
         }
     }
+
+    /// A helper that dies at every request must not start again for each request.
+    @Test func pausesAHelperThatKeepsDying() async throws {
+        try await withHook(nil) { _, directory in
+            let marker = directory.appendingPathComponent("starts.txt")
+            // The helper notes each start, reads the request, and leaves with no answer.
+            let helper = "echo start >> '\(marker.path)'; read request; exit 1"
+            let json = #"{"daemon":"\#(helper)"}"#
+            try json.write(
+                to: directory.appendingPathComponent(VolumeCommandRunner.fileName),
+                atomically: true,
+                encoding: .utf8
+            )
+            let runner = VolumeCommandRunner(directory: directory)
+            for _ in 0..<6 {
+                #expect(await runner.level() == nil)
+            }
+            let starts = try String(contentsOf: marker, encoding: .utf8)
+                .split(separator: "\n").count
+            // Each request starts the helper at most twice, and the runner stops after
+            // three failed requests in a row.
+            #expect(starts == 2 * VolumeCommandRunner.helperFailureLimit)
+            await runner.stop()
+        }
+    }
 }

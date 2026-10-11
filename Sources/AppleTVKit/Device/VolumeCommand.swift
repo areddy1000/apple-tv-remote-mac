@@ -86,6 +86,9 @@ private final class VolumeHelper: @unchecked Sendable {
         process.standardError = FileHandle.nullDevice
         input = toHelper.fileHandleForWriting
         output = fromHelper.fileHandleForReading
+        // A helper can exit just before a request. A write to its closed pipe then sends
+        // SIGPIPE, which stops the whole app. With this flag the write throws instead.
+        _ = fcntl(input.fileDescriptor, F_SETNOSIGPIPE, 1)
         try process.run()
     }
 
@@ -124,11 +127,22 @@ public actor VolumeCommandRunner {
     /// The file is checked for changes no more than once per this many seconds.
     private static let recheckInterval: TimeInterval = 1
 
+    /// After this many failed requests in a row, the helper pauses before it starts again.
+    static let helperFailureLimit = 3
+    /// The first pause after the limit. Each later pause doubles, up to `helperMaxPause`.
+    private static let helperFirstPause: TimeInterval = 30
+    private static let helperMaxPause: TimeInterval = 600
+
     private let fileURL: URL
     private var cached = VolumeCommand()
     private var modified: Date?
     private var checked = Date.distantPast
     private var helper: VolumeHelper?
+    /// Failed helper requests in a row.
+    private var helperFailures = 0
+    /// The helper does not start again before this time.
+    private var helperPausedUntil: Date?
+    private var helperPause = VolumeCommandRunner.helperFirstPause
 
     public init(directory: URL? = nil) {
         let base = directory ?? CredentialStore.defaultDirectory()
@@ -153,6 +167,7 @@ public actor VolumeCommandRunner {
         // A changed file may name a different helper, so drop the running one.
         helper?.stop()
         helper = nil
+        resetHelperPause()
         cached = decoded
         return cached
     }
@@ -164,9 +179,10 @@ public actor VolumeCommandRunner {
     }
 
     /// Sends one request to the long-running helper. Nil when there is none, or it failed.
-    /// A helper that died is started again once.
+    /// A helper that died is started again once. A helper that keeps dying pauses.
     private func ask(_ request: String) async -> String? {
         guard let line = command().daemon else { return nil }
+        if let until = helperPausedUntil, Date() < until { return nil }
         for attempt in 0..<2 {
             if helper?.isRunning != true {
                 helper?.stop()
@@ -175,6 +191,8 @@ public actor VolumeCommandRunner {
             guard let helper else { return nil }
             do {
                 let reply = try await Self.send(request, to: helper)
+                // The helper answered, so it works, also when it refuses this request.
+                resetHelperPause()
                 if reply.hasPrefix("err") {
                     ATVLog.input.error("volume helper refused: \(reply, privacy: .public)")
                     return nil
@@ -188,7 +206,25 @@ public actor VolumeCommandRunner {
                 }
             }
         }
+        noteHelperFailure()
         return nil
+    }
+
+    /// Counts a failed request. At the limit the helper pauses, and each pause doubles.
+    /// A broken helper then costs no new process for each poll and each event.
+    private func noteHelperFailure() {
+        helperFailures += 1
+        guard helperFailures >= Self.helperFailureLimit else { return }
+        ATVLog.input.error("volume helper keeps failing, pausing for \(Int(self.helperPause)) s")
+        helperPausedUntil = Date().addingTimeInterval(helperPause)
+        helperPause = min(helperPause * 2, Self.helperMaxPause)
+        helperFailures = 0
+    }
+
+    private func resetHelperPause() {
+        helperFailures = 0
+        helperPausedUntil = nil
+        helperPause = Self.helperFirstPause
     }
 
     /// Runs one exchange on the helper's own thread, and stops a helper that hangs.
@@ -269,33 +305,42 @@ public actor VolumeCommandRunner {
     }
 
     /// Runs one shell command and returns what it printed.
+    ///
+    /// The reads and the wait block a thread. They run on a dispatch queue, because a
+    /// blocked thread in the shared task pool stalls other tasks.
     private static func run(_ shellCommand: String) async throws -> String {
-        try await Task.detached(priority: .userInitiated) { () throws -> String in
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/bin/sh")
-            process.arguments = ["-c", shellCommand]
-            let output = Pipe()
-            let errors = Pipe()
-            process.standardOutput = output
-            process.standardError = errors
-            process.standardInput = FileHandle.nullDevice
-            try process.run()
-
-            // Stop a command that hangs. The pipe then closes and the read below returns.
-            let box = ProcessBox(process)
-            DispatchQueue.global().asyncAfter(deadline: .now() + Self.timeout) {
-                if box.process.isRunning { box.process.terminate() }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                continuation.resume(with: Result { try runBlocking(shellCommand) })
             }
+        }
+    }
 
-            let data = output.fileHandleForReading.readDataToEndOfFile()
-            let problem = errors.fileHandleForReading.readDataToEndOfFile()
-            process.waitUntilExit()
+    private static func runBlocking(_ shellCommand: String) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", shellCommand]
+        let output = Pipe()
+        let errors = Pipe()
+        process.standardOutput = output
+        process.standardError = errors
+        process.standardInput = FileHandle.nullDevice
+        try process.run()
 
-            guard process.terminationStatus == 0 else {
-                let text = String(decoding: problem, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-                throw VolumeCommandError.failed(status: process.terminationStatus, output: text)
-            }
-            return String(decoding: data, as: UTF8.self)
-        }.value
+        // Stop a command that hangs. The pipe then closes and the read below returns.
+        let box = ProcessBox(process)
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.timeout) {
+            if box.process.isRunning { box.process.terminate() }
+        }
+
+        let data = output.fileHandleForReading.readDataToEndOfFile()
+        let problem = errors.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            let text = String(decoding: problem, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            throw VolumeCommandError.failed(status: process.terminationStatus, output: text)
+        }
+        return String(decoding: data, as: UTF8.self)
     }
 }
