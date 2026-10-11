@@ -70,7 +70,7 @@ public actor CompanionSession {
     private let connection: CompanionConnection
     private let eventsContinuation: AsyncStream<CompanionEvent>.Continuation
     private var nextXID: Int64 = 1
-    private var pending: [Int64: CheckedContinuation<OPACKValue, Error>] = [:]
+    private var pending = PendingReplies<Int64, OPACKValue>()
     private var rawWaiters: [CheckedContinuation<CompanionFrame, Error>] = []
     private var reader: Task<Void, Never>?
     private var isVerified = false
@@ -109,10 +109,7 @@ public actor CompanionSession {
 
     private func linkDropped() {
         isVerified = false
-        for (_, continuation) in pending {
-            continuation.resume(throwing: CompanionError.notConnected)
-        }
-        pending.removeAll()
+        pending.failAll(CompanionError.notConnected)
         for waiter in rawWaiters {
             waiter.resume(throwing: CompanionError.notConnected)
         }
@@ -144,14 +141,15 @@ public actor CompanionSession {
             return
         }
         let type = value["_t"]?.intValue ?? 0
-        if type == 3, let xid = value["_x"]?.intValue, let continuation = pending.removeValue(forKey: xid) {
+        if type == 3, let xid = value["_x"]?.intValue {
+            let result: Result<OPACKValue, Error>
             if let code = value["_ec"]?.intValue, code != 0 {
                 let message = value["_em"]?.stringValue ?? "error"
-                continuation.resume(throwing: CompanionError.accessoryError(code: code, message: message))
+                result = .failure(CompanionError.accessoryError(code: code, message: message))
             } else {
-                continuation.resume(returning: value["_c"] ?? .null)
+                result = .success(value["_c"] ?? .null)
             }
-            return
+            if pending.resolve(xid, with: result) { return }
         }
         let id = value["_i"]?.stringValue ?? ""
         if type == 2, let xid = value["_x"]?.intValue {
@@ -220,18 +218,16 @@ public actor CompanionSession {
     public func request(_ id: String, content: OPACKValue = .dictionary([:]), timeout: Duration = .seconds(8)) async throws -> OPACKValue {
         let xid = try await send(id, type: 2, content: content)
         return try await withCheckedThrowingContinuation { continuation in
-            pending[xid] = continuation
-            Task { [weak self] in
-                try? await Task.sleep(for: timeout)
+            let timer = PendingReplies<Int64, OPACKValue>.timer(after: timeout) { [weak self] in
                 await self?.expire(xid: xid)
             }
+            pending.add(xid, continuation: continuation, timer: timer)
         }
     }
 
     /// Fails a request that got no answer in time.
     private func expire(xid: Int64) {
-        guard let continuation = pending.removeValue(forKey: xid) else { return }
-        continuation.resume(throwing: CompanionError.timeout)
+        pending.resolve(xid, with: .failure(CompanionError.timeout))
     }
 
     /// Sends an event. The TV never answers an event.

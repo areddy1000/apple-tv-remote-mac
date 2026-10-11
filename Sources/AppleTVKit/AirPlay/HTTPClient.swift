@@ -22,7 +22,7 @@ public actor AirPlayHTTPConnection {
     private var sealedBuffer = Data()
     private var plainBuffer = Data()
     /// Requests that wait for a response, oldest first. Responses arrive in request order.
-    private var pending: [(id: UInt64, continuation: CheckedContinuation<HTTPResponse, Error>)] = []
+    private var pending = PendingReplies<UInt64, HTTPResponse>()
     private var nextRequestID: UInt64 = 0
     private var isOpen = false
     private(set) public var localAddress: String?
@@ -110,12 +110,12 @@ public actor AirPlayHTTPConnection {
         try await write(data)
         let requestID = nextRequestID
         nextRequestID += 1
+        let label = "\(method) \(path)"
         let response: HTTPResponse = try await withCheckedThrowingContinuation { continuation in
-            pending.append((requestID, continuation))
-            Task { [weak self] in
-                try? await Task.sleep(for: timeout)
-                await self?.expire(requestID: requestID, label: "\(method) \(path)")
+            let timer = PendingReplies<UInt64, HTTPResponse>.timer(after: timeout) { [weak self] in
+                await self?.expire(requestID: requestID, label: label)
             }
+            pending.add(requestID, continuation: continuation, timer: timer)
         }
         if Self.trace {
             ATVLog.airplay.debug("recv \(response.status) for \(method, privacy: .public) \(path, privacy: .public) \(response.body.count) bytes")
@@ -125,9 +125,7 @@ public actor AirPlayHTTPConnection {
 
     /// Fails one request that got no answer in time. A request that was answered is left alone.
     private func expire(requestID: UInt64, label: String) {
-        guard let index = pending.firstIndex(where: { $0.id == requestID }) else { return }
-        let expired = pending.remove(at: index)
-        expired.continuation.resume(throwing: AirPlayHTTPError.timeout(label))
+        pending.resolve(requestID, with: .failure(AirPlayHTTPError.timeout(label)))
     }
 
     /// Answers a request the device sent us.
@@ -191,8 +189,8 @@ public actor AirPlayHTTPConnection {
             plainBuffer.removeFirst(consumed)
             switch message {
             case .response(let response):
-                if !pending.isEmpty {
-                    pending.removeFirst().continuation.resume(returning: response)
+                if let oldest = pending.oldestKey {
+                    pending.resolve(oldest, with: .success(response))
                 } else {
                     ATVLog.airplay.debug("response with no request: \(response.status)")
                 }
@@ -206,10 +204,7 @@ public actor AirPlayHTTPConnection {
         guard isOpen else { return }
         isOpen = false
         connection.cancel()
-        for request in pending {
-            request.continuation.resume(throwing: AirPlayHTTPError.closed)
-        }
-        pending.removeAll()
+        pending.failAll(AirPlayHTTPError.closed)
         incomingContinuation.finish()
     }
 }

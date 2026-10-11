@@ -219,7 +219,7 @@ public actor MRPSession {
     private let clientID: String
     private var reader: Task<Void, Never>?
     private var heartbeat: Task<Void, Never>?
-    private var pending: [String: CheckedContinuation<MRPMessage, Error>] = [:]
+    private var pending = PendingReplies<String, MRPMessage>()
     private var state = MRPPlayerStateManager()
     private var artworkRequested: String?
     private var lastPublished: NowPlaying?
@@ -260,8 +260,7 @@ public actor MRPSession {
     }
 
     private func closed() {
-        for (_, continuation) in pending { continuation.resume(throwing: MRPError.closed) }
-        pending.removeAll()
+        pending.failAll(MRPError.closed)
         nowPlayingContinuation.finish()
     }
 
@@ -281,17 +280,15 @@ public actor MRPSession {
         let id = identifier ?? (try? MRPMessage.decode(data).identifier) ?? UUID().uuidString
         try await channel.send(protobuf: data)
         return try await withCheckedThrowingContinuation { continuation in
-            pending[id] = continuation
-            Task { [weak self] in
-                try? await Task.sleep(for: timeout)
+            let timer = PendingReplies<String, MRPMessage>.timer(after: timeout) { [weak self] in
                 await self?.expire(id)
             }
+            pending.add(id, continuation: continuation, timer: timer)
         }
     }
 
     private func expire(_ id: String) {
-        guard let continuation = pending.removeValue(forKey: id) else { return }
-        continuation.resume(throwing: MRPError.timeout(id))
+        pending.resolve(id, with: .failure(MRPError.timeout(id)))
     }
 
     private func handle(_ data: Data) async {
@@ -302,9 +299,9 @@ public actor MRPSession {
         if Self.trace {
             ATVLog.mrp.debug("recv type \(message.type) id \(message.identifier ?? "-", privacy: .public)")
         }
-        if let id = message.identifier, let continuation = pending.removeValue(forKey: id) {
-            continuation.resume(returning: message)
+        if let id = message.identifier {
             // A reply can also carry state, for example the playback queue with artwork.
+            pending.resolve(id, with: .success(message))
         }
         if state.apply(message) {
             await publish()
