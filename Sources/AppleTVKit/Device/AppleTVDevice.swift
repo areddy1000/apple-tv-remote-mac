@@ -183,27 +183,63 @@ public actor AppleTVDevice: RemoteController {
     }
 
     private func runConnectLoop(generation: Int) async {
-        var attempt = 0
+        // The drops in a row. A link that holds for `stableLink` starts the count again.
+        var drops = 0
         while wantsConnection, !Task.isCancelled {
-            set(attempt == 0 ? .connecting : .reconnecting)
+            set(drops == 0 ? .connecting : .reconnecting)
             do {
                 try await establish()
-                attempt = 0
-                await waitForDrop()
-                if !wantsConnection { break }
-                ATVLog.companion.info("link dropped, reconnecting")
-                await stopAirPlay()
             } catch {
                 // The app waits for the user after a failure, and retries when the user asks
                 // for something. A retry loop in the background keeps the panel in an error.
                 ATVLog.companion.error("connect failed: \(String(describing: error), privacy: .public)")
                 set(Self.stateAfterFailure(error))
                 wantsConnection = false
+                await volumeHook.stop()
                 break
             }
-            attempt += 1
+            let linkStart = ContinuousClock.now
+            await waitForDrop()
+            if !wantsConnection { break }
+            await stopAirPlay()
+            if ContinuousClock.now - linkStart >= Self.stableLink { drops = 0 }
+            drops += 1
+            guard Self.mayReconnect(afterDropWith: airplayGate.power) else {
+                ATVLog.companion.info("link dropped while the Apple TV sleeps, waiting for the user")
+                set(.idle)
+                wantsConnection = false
+                break
+            }
+            guard let delay = Self.reconnectDelay(forDrop: drops) else {
+                ATVLog.companion.error("link dropped \(drops) times, waiting for the user")
+                set(.failed("The link to the Apple TV keeps dropping."))
+                wantsConnection = false
+                break
+            }
+            ATVLog.companion.info("link dropped, reconnecting")
+            set(.reconnecting)
+            try? await Task.sleep(for: delay)
         }
         if connectGeneration == generation { connectLoop = nil }
+    }
+
+    /// The most reconnects in a row after lost links. Then the app waits for the user.
+    static let maxReconnects = 4
+    /// A link that holds this long counts as good, and the drop count starts again.
+    static let stableLink: Duration = .seconds(60)
+
+    /// The wait before the reconnect after drop number `drop`: 1, 2, 4 and 8 s.
+    /// Nil means no more reconnects. The app then waits for the user.
+    static func reconnectDelay(forDrop drop: Int) -> Duration? {
+        guard (1...maxReconnects).contains(drop) else { return nil }
+        return .seconds(1 << (drop - 1))
+    }
+
+    /// True when a lost link may come back by itself.
+    /// A connect to a sleeping Apple TV can wake it through the Bonjour Sleep Proxy, and
+    /// that turns the television on. So a sleeping Apple TV waits for the user.
+    static func mayReconnect(afterDropWith power: PowerState) -> Bool {
+        power != .asleep
     }
 
     /// The state the device waits in after a failed connection.
