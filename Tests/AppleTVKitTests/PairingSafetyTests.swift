@@ -70,3 +70,19 @@ struct ConnectionStateTests {
         #expect(!ConnectionState.failed("x").isBusy)
     }
 }
+
+/// After a failed connection the app waits for the user. It does not retry in the background.
+@Suite("ConnectFailureTests")
+struct ConnectFailureTests {
+    @Test func aNetworkFailureWaitsAsFailed() {
+        #expect(AppleTVDevice.stateAfterFailure(CompanionError.timeout) == .failed("The Apple TV did not answer."))
+    }
+
+    @Test func aRejectedKeyWaitsForPairing() {
+        #expect(AppleTVDevice.stateAfterFailure(DeviceError.needsPairing) == .needsPairing)
+    }
+
+    @Test func aCancelledPairingGoesIdle() {
+        #expect(AppleTVDevice.stateAfterFailure(CompanionError.pairingCancelled) == .idle)
+    }
+}

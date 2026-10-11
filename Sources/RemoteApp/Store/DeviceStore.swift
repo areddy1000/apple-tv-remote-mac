@@ -68,6 +68,9 @@ final class DeviceStore {
     var keyboardVisible = false
     /// True while the user drags the volume slider. TV reports are ignored then.
     var volumeDragging = false
+    /// True after the user asks for something while no link is up. Until then the panel
+    /// stays calm and shows no pairing prompt or error. Closing the panel clears it.
+    var connectionRequested = false
 
     // MARK: Controller
 
@@ -117,6 +120,7 @@ final class DeviceStore {
             connection = state
             if case .failed(let message) = state { lastError = message }
             if state == .connected {
+                connectionRequested = false
                 lastError = nil
                 refreshVolume()
                 startPolling()
@@ -179,6 +183,8 @@ final class DeviceStore {
 
     /// The rest state the status card shows. Highest trouble first.
     var status: PanelStatus {
+        // Without a link, the panel stays calm until the user asks for something.
+        if !connection.isConnected, !connection.isBusy, !connectionRequested { return .idle }
         if connection == .needsPairing { return .needsPairing }
         if case .failed(let message) = connection { return .problem(message) }
         if let error = lastError, !connection.isConnected { return .problem(error) }
@@ -227,8 +233,18 @@ final class DeviceStore {
 
     // MARK: Input
 
+    /// Called by each user action. Without a link, it shows what is wrong and tries to connect.
+    /// A missing pairing only shows the Pair button, because a PIN turns the television on.
+    func requestConnection() {
+        guard !connection.isConnected else { return }
+        connectionRequested = true
+        guard connection != .needsPairing, !connection.isBusy, let controller else { return }
+        Task { await controller.connect() }
+    }
+
     /// Sends a button down and marks it pressed. The socket write happens on the controller.
     func buttonDown(_ button: RemoteButton) {
+        requestConnection()
         guard !pressedButtons.contains(button) else { return }
         pressedButtons.insert(button)
         controller?.button(button, down: true)
@@ -248,6 +264,7 @@ final class DeviceStore {
 
     /// A full click for menus, scripting and the palette.
     func click(_ button: RemoteButton) {
+        requestConnection()
         controller?.press(button)
         flash(button)
     }
@@ -262,6 +279,7 @@ final class DeviceStore {
     }
 
     func touch(_ event: TouchEvent) {
+        requestConnection()
         controller?.touch(event)
     }
 
@@ -288,6 +306,7 @@ final class DeviceStore {
     }
 
     func loadApps() {
+        requestConnection()
         guard let controller else { return }
         Task { [weak self] in
             do {
@@ -305,6 +324,7 @@ final class DeviceStore {
 
     /// Runs one controller call and shows its error, if any.
     private func perform(_ action: @escaping @Sendable (any RemoteController) async throws -> Void) {
+        requestConnection()
         guard let controller else { return }
         Task { [weak self] in
             do {
@@ -332,8 +352,9 @@ final class DeviceStore {
     var statusColor: Color {
         switch connection {
         case .connected: power == .asleep ? Tokens.inkTertiary : .green
-        case .connecting, .reconnecting, .pairing, .awaitingPIN, .needsPairing: .orange
-        case .failed: Tokens.danger
+        case .needsPairing: connectionRequested ? .orange : Tokens.inkTertiary
+        case .connecting, .reconnecting, .pairing, .awaitingPIN: .orange
+        case .failed: connectionRequested ? Tokens.danger : Tokens.inkTertiary
         case .idle: Tokens.inkTertiary
         }
     }

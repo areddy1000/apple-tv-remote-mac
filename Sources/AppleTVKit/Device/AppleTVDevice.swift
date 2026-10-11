@@ -169,27 +169,30 @@ public actor AppleTVDevice: RemoteController {
                 if !wantsConnection { break }
                 ATVLog.companion.info("link dropped, reconnecting")
                 await stopAirPlay()
-            } catch CompanionError.pairingCancelled {
-                set(.idle)
-                wantsConnection = false
-                break
-            } catch DeviceError.needsPairing {
-                // Retrying cannot help. A PIN would turn the television on, so wait.
-                set(.needsPairing)
-                wantsConnection = false
-                break
             } catch {
+                // The app waits for the user after a failure, and retries when the user asks
+                // for something. A retry loop in the background keeps the panel in an error.
                 ATVLog.companion.error("connect failed: \(String(describing: error), privacy: .public)")
-                set(.failed(describe(error)))
+                set(Self.stateAfterFailure(error))
+                wantsConnection = false
+                break
             }
             attempt += 1
-            let delay = min(15, pow(2, Double(min(attempt, 4))))
-            try? await Task.sleep(for: .seconds(delay))
         }
         if connectGeneration == generation { connectLoop = nil }
     }
 
-    private func describe(_ error: Error) -> String {
+    /// The state the device waits in after a failed connection.
+    /// A rejected key waits for a pairing, because a PIN would turn the television on.
+    static func stateAfterFailure(_ error: Error) -> ConnectionState {
+        switch error {
+        case CompanionError.pairingCancelled: .idle
+        case DeviceError.needsPairing: .needsPairing
+        default: .failed(describe(error))
+        }
+    }
+
+    private static func describe(_ error: Error) -> String {
         switch error {
         case CompanionError.accessoryError(let code, let message): "Apple TV error \(code): \(message)"
         case CompanionError.timeout: "The Apple TV did not answer."

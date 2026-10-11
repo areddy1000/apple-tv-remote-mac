@@ -27,5 +27,7 @@ struct MenuBarPanel: View {
             }
         }
         .animation(Motion.crossfade, value: store.connection == .awaitingPIN)
+        // The pairing prompt and errors show only after a request in this panel visit.
+        .onDisappear { store.connectionRequested = false }
     }
 }

@@ -72,7 +72,7 @@ struct StatusCard: View {
 
     private var symbol: String {
         switch store.status {
-        case .idle: "wifi.slash"
+        case .idle: store.selectedDeviceID == nil ? "wifi.slash" : "appletv"
         case .busy: "arrow.triangle.2.circlepath"
         case .needsPairing: "lock.open"
         case .asleep: "moon.zzz"
@@ -96,7 +96,9 @@ struct StatusCard: View {
     private var detail: String {
         switch store.status {
         case .idle:
-            store.devices.isEmpty ? "Looking for an Apple TV." : "Choose an Apple TV above."
+            if store.devices.isEmpty { "Looking for an Apple TV." }
+            else if store.selectedDeviceID == nil { "Choose an Apple TV above." }
+            else { "Press any button to connect." }
         case .busy:
             "This takes a moment."
         case .needsPairing:
