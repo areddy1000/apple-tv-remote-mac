@@ -309,7 +309,7 @@ public actor MRPSession {
     }
 
     private func publish() async {
-        let current = state.nowPlaying
+        let current = Self.stabilized(state.nowPlaying, previous: lastPublished)
         if current != lastPublished {
             lastPublished = current
             nowPlayingContinuation.yield(current)
@@ -323,6 +323,18 @@ public actor MRPSession {
             artworkRequested = itemKey
             try? await channel.send(protobuf: MRPMessageBuilder.playbackQueueRequest(identifier: UUID().uuidString, location: Int32(state.activeLocation)))
         }
+    }
+
+    /// Keeps the earlier timestamp when the position and the rate did not change.
+    ///
+    /// A message with no elapsed date gets the time of arrival. Without this, each message
+    /// makes a new value, and the UI draws again for nothing.
+    static func stabilized(_ current: NowPlaying?, previous: NowPlaying?) -> NowPlaying? {
+        guard var current, let previous,
+              current.elapsed == previous.elapsed, current.rate == previous.rate
+        else { return current }
+        current.elapsedAt = previous.elapsedAt
+        return current
     }
 
     /// Sends a transport command.

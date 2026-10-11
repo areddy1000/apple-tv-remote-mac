@@ -183,3 +183,36 @@ struct MRPTests {
         #expect(manager.nowPlaying?.appName == "Netflix")
     }
 }
+
+/// A message with no change must not publish a new now-playing value.
+/// A new timestamp alone makes the UI draw again for nothing.
+@Suite("NowPlayingStabilityTests")
+struct NowPlayingStabilityTests {
+    private let earlier = Date(timeIntervalSince1970: 1_000)
+    private let later = Date(timeIntervalSince1970: 1_030)
+
+    @Test func theSamePositionKeepsTheEarlierTimestamp() {
+        let previous = NowPlaying(title: "Film", elapsed: 50, elapsedAt: earlier, rate: 1)
+        let current = NowPlaying(title: "Film", elapsed: 50, elapsedAt: later, rate: 1)
+        let stable = MRPSession.stabilized(current, previous: previous)
+        #expect(stable?.elapsedAt == earlier)
+        #expect(stable == previous)
+    }
+
+    @Test func aNewPositionTakesTheNewTimestamp() {
+        let previous = NowPlaying(title: "Film", elapsed: 50, elapsedAt: earlier, rate: 1)
+        let current = NowPlaying(title: "Film", elapsed: 80, elapsedAt: later, rate: 1)
+        #expect(MRPSession.stabilized(current, previous: previous)?.elapsedAt == later)
+    }
+
+    @Test func aNewRateTakesTheNewTimestamp() {
+        let previous = NowPlaying(title: "Film", elapsed: 50, elapsedAt: earlier, rate: 1)
+        let current = NowPlaying(title: "Film", elapsed: 50, elapsedAt: later, rate: 0)
+        #expect(MRPSession.stabilized(current, previous: previous)?.elapsedAt == later)
+    }
+
+    @Test func nothingPlayingStaysNil() {
+        let previous = NowPlaying(title: "Film", elapsed: 50, elapsedAt: earlier, rate: 1)
+        #expect(MRPSession.stabilized(nil, previous: previous) == nil)
+    }
+}
