@@ -161,9 +161,10 @@ final class DeviceStore {
         case .connection(let state):
             connection = state
             if !state.isConnected {
-                // Nothing to ask without a link.
+                // Nothing to ask without a link. Nothing reports now-playing either.
                 pollTask?.cancel()
                 pollTask = nil
+                if nowPlaying != nil { nowPlaying = nil }
             }
             if case .failed(let message) = state { lastError = message }
             if state == .connected {

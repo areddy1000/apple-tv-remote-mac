@@ -11,7 +11,7 @@ struct RemoteBody: View {
         // Nothing here asks for more height, so the menu bar panel keeps its size.
         ZStack(alignment: .top) {
             VStack(spacing: 16) {
-                if let info = store.nowPlaying {
+                if store.showsRemote, let info = store.nowPlaying {
                     // The card slides in from the top and pushes the remote down.
                     NowPlayingView(info: info)
                         .transition(
@@ -28,8 +28,14 @@ struct RemoteBody: View {
                         .transition(.opacity)
                 }
                 // The menu bar panel does not bound the clickpad, so it gets a fixed height.
-                TouchSurfaceView()
-                    .frame(height: 220)
+                if store.showsRemote {
+                    TouchSurfaceView()
+                        .frame(height: 220)
+                } else {
+                    // The hidden remote keeps its size, but drops the trackpad tracking area.
+                    Color.clear
+                        .frame(height: 220)
+                }
                 TransportBar()
                 if store.keyboardVisible {
                     KeyboardBar()
