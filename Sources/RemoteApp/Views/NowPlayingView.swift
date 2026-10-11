@@ -84,7 +84,9 @@ struct NowPlayingView: View {
     }
 
     private func progress(duration: Double) -> some View {
-        TimelineView(.periodic(from: .now, by: info.isPlaying ? 0.5 : 60)) { context in
+        // One tick each second moves the time label by one step. A closed panel shows
+        // nothing, so it ticks only once a minute.
+        TimelineView(.periodic(from: .now, by: info.isPlaying && store.panelVisible ? 1 : 60)) { context in
             let live = info.elapsed(at: context.date)
             // While you drag, the bar and the labels follow the pointer, not the player.
             let elapsed = scrubFraction.map { $0 * duration } ?? live
