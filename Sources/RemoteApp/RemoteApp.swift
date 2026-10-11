@@ -41,6 +41,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         LoginItem.configureOnFirstLaunch()
         keyMonitor.start()
+        store.watchDisplays()
         coordinator.start()
         hotKey = HotKey { MenuBarPanelOpener.open() }
     }

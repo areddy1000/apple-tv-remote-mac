@@ -65,6 +65,37 @@ final class DeviceStore {
         }
     }
 
+    // MARK: AirPlay display
+
+    /// The display this Mac sends to an Apple TV, or nil when it sends none.
+    private(set) var airplayDisplay: AirPlayDisplay?
+    private var screenObserver: (any NSObjectProtocol)?
+
+    /// Follows the displays and keeps `airplayDisplay` current.
+    /// macOS posts a screen change when AirPlay starts and when it stops.
+    func watchDisplays() {
+        guard screenObserver == nil else { return }
+        airplayDisplay = AirPlayDisplayScanner.current()
+        screenObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.readDisplays() }
+        }
+    }
+
+    private func readDisplays() {
+        let found = AirPlayDisplayScanner.current()
+        guard found != airplayDisplay else { return }
+        airplayDisplay = found
+        if let found {
+            ATVLog.companion.info("airplay display: \(found.label, privacy: .public)")
+        } else {
+            ATVLog.companion.info("airplay display ended")
+        }
+    }
+
     // MARK: Pairing
 
     var pinEntry = ""
