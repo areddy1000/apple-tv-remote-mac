@@ -3,6 +3,19 @@ import Foundation
 import Observation
 import SwiftUI
 
+/// What the status card says when nothing plays.
+///
+/// Every case is a complete rest state. The menu bar panel shows one of them at all times,
+/// so it never leaves a hole where the user expects to read something.
+enum PanelStatus: Equatable {
+    case idle
+    case busy(String)
+    case needsPairing
+    case asleep
+    case nothingPlaying
+    case problem(String)
+}
+
 /// The one source of truth for the UI. Runs on the main actor.
 @MainActor
 @Observable
@@ -22,6 +35,9 @@ final class DeviceStore {
     var apps: [LaunchableApp] = []
     /// The volume as 0...1. Nil when the current output reports no level.
     var volume: Double?
+    /// True after the app has asked this Apple TV for a level one time.
+    /// It keeps the no-volume notice away until the first answer arrives.
+    private(set) var volumeChecked = false
     /// The last failure, shown under the remote. It clears by itself after a few seconds,
     /// and a click clears it at once.
     var lastError: String? {
@@ -83,6 +99,7 @@ final class DeviceStore {
         apps = []
         textInput = .inactive
         volume = nil
+        volumeChecked = false
         connection = .idle
 
         eventTask = Task { [weak self] in
@@ -117,6 +134,7 @@ final class DeviceStore {
         case .apps(let list):
             apps = list
         case .volume(let level):
+            volumeChecked = true
             if !volumeDragging { volume = level == DeviceEvent.noVolumeLevel ? nil : level }
         }
     }
@@ -143,9 +161,32 @@ final class DeviceStore {
     func refreshVolume() {
         guard let controller else { return }
         Task { [weak self] in
-            guard let level = try? await controller.volumeLevel(), let self, !self.volumeDragging else { return }
-            self.volume = level
+            let level = try? await controller.volumeLevel()
+            guard let self, !self.volumeDragging else { return }
+            self.volumeChecked = true
+            // A read that failed keeps the last level. Only a real answer moves the slider.
+            if let level { self.volume = level }
         }
+    }
+
+    /// True when this Apple TV gives the app no way to change the volume.
+    ///
+    /// The app asked and got no level. A sleeping Apple TV answers nothing either, so it
+    /// does not count.
+    var volumeUnavailable: Bool {
+        connection.isConnected && power != .asleep && volumeChecked && volume == nil
+    }
+
+    /// The rest state the status card shows. Highest trouble first.
+    var status: PanelStatus {
+        if connection == .needsPairing { return .needsPairing }
+        if case .failed(let message) = connection { return .problem(message) }
+        if let error = lastError, !connection.isConnected { return .problem(error) }
+        if connection.isBusy { return .busy(connection.label) }
+        if connection == .idle { return .idle }
+        if power == .asleep { return .asleep }
+        if let error = lastError { return .problem(error) }
+        return .nothingPlaying
     }
 
     // MARK: Power

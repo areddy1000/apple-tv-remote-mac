@@ -159,7 +159,8 @@ soundbar or receiver on HDMI ARC, or an AirPlay speaker such as a HomePod.
 Many televisions give the Apple TV no such route. The Apple TV then sends volume by infrared
 from the remote itself, and no network client can reach that, not this app and not Apple's
 own Remote app. The symptom is plain: the Apple TV blinks when you press the key, and
-nothing happens.
+nothing happens. The app shows **Volume needs local access to your TV** where the slider
+normally is.
 
 The hook fixes that by talking to the television directly. Put a file named
 `volume-command.json` in `~/Library/Application Support/AppleTVRemote/`:

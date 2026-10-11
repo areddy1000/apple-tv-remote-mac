@@ -25,6 +25,10 @@ struct RemoteBody: View {
                                     removal: .opacity
                                 )
                         )
+                } else if compact {
+                    // The panel keeps its height, so this slot never empties.
+                    StatusCard()
+                        .transition(.opacity)
                 }
                 // The window bounds the clickpad. The menu bar panel does not, so it gets a fixed height.
                 TouchSurfaceView()
@@ -35,7 +39,7 @@ struct RemoteBody: View {
                     KeyboardBar()
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6)))
                 }
-                if let error = store.lastError {
+                if let error = store.lastError, !compact {
                     HStack(spacing: 6) {
                         Text(error)
                             .font(Tokens.caption)
@@ -55,7 +59,7 @@ struct RemoteBody: View {
                 }
             }
             .padding(Tokens.inset)
-            .animation(reduceMotion ? Motion.reduced : Motion.panelOpen, value: store.keyboardVisible)
+            .animation(compact ? nil : (reduceMotion ? Motion.reduced : Motion.panelOpen), value: store.keyboardVisible)
             .animation(reduceMotion ? Motion.reduced : Motion.panelOpen, value: store.nowPlaying == nil)
             .animation(Motion.crossfade, value: store.lastError)
 
