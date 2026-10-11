@@ -157,7 +157,8 @@ final class DeviceStore {
                 startPolling()
             }
         case .power(let state):
-            power = state
+            // Observation reports every write, also one with the same value.
+            if power != state { power = state }
         case .nowPlaying(let info):
             withAnimation(Motion.crossfade) { nowPlaying = info }
         case .textInput(let state):
@@ -169,8 +170,9 @@ final class DeviceStore {
         case .apps(let list):
             apps = list
         case .volume(let level):
-            volumeChecked = true
-            if !volumeDragging { volume = level == DeviceEvent.noVolumeLevel ? nil : level }
+            if !volumeChecked { volumeChecked = true }
+            let reported = level == DeviceEvent.noVolumeLevel ? nil : level
+            if !volumeDragging, volume != reported { volume = reported }
         }
     }
 
@@ -198,9 +200,9 @@ final class DeviceStore {
         Task { [weak self] in
             let level = try? await controller.volumeLevel()
             guard let self, !self.volumeDragging else { return }
-            self.volumeChecked = true
+            if !self.volumeChecked { self.volumeChecked = true }
             // A read that failed keeps the last level. Only a real answer moves the slider.
-            if let level { self.volume = level }
+            if let level, self.volume != level { self.volume = level }
         }
     }
 
@@ -242,8 +244,8 @@ final class DeviceStore {
     func refreshPower() {
         guard let controller, connection.isConnected else { return }
         Task { [weak self] in
-            guard let state = try? await controller.powerState() else { return }
-            self?.power = state
+            guard let state = try? await controller.powerState(), let self, self.power != state else { return }
+            self.power = state
         }
     }
 

@@ -38,11 +38,14 @@ final class AppCoordinator {
             await self.refreshKnown()
             await self.browser.start()
             for await devices in self.browser.devices {
+                // Bonjour reports often with no change. Each write makes the UI draw again.
+                guard devices != self.store.devices else { continue }
+                let old = Dictionary(self.store.devices.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
                 self.store.devices = devices
                 self.publishKnown()
                 self.connectAtLaunch()
-                // Endpoints can arrive after the first sighting. Pass the fresh record on.
-                for device in devices {
+                // Endpoints can arrive after the first sighting. Pass a changed record on.
+                for device in devices where old[device.id] != device {
                     if let controller = self.controllers[device.id] {
                         Task { await controller.update(device: device) }
                     }
@@ -58,7 +61,8 @@ final class AppCoordinator {
     }
 
     private func publishKnown() {
-        store.knownDevices = KnownDevice.merge(discovered: store.devices, stored: stored)
+        let known = KnownDevice.merge(discovered: store.devices, stored: stored)
+        if known != store.knownDevices { store.knownDevices = known }
     }
 
     /// Connects one time at launch to a paired Apple TV: the last used one, else the first.

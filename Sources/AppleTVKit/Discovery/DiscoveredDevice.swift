@@ -57,9 +57,18 @@ public struct DiscoveredDevice: Identifiable, Sendable {
     }
 }
 
+/// Two values are equal when every field is equal. The hash uses the identifier only,
+/// so one device keeps one hash when its endpoints change.
 extension DiscoveredDevice: Equatable, Hashable {
     public static func == (lhs: DiscoveredDevice, rhs: DiscoveredDevice) -> Bool {
         lhs.id == rhs.id
+            && lhs.name == rhs.name
+            && lhs.model == rhs.model
+            && lhs.macAddress == rhs.macAddress
+            && lhs.osVersion == rhs.osVersion
+            && lhs.companionEndpoint == rhs.companionEndpoint
+            && lhs.airplayEndpoint == rhs.airplayEndpoint
+            && lhs.isAppleTV == rhs.isAppleTV
     }
 
     public func hash(into hasher: inout Hasher) {

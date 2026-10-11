@@ -72,4 +72,19 @@ import Testing
         #expect(try WakeOnLAN.magicPacket(mac: "02-00-00-00-00-01") == packet)
         #expect(throws: WakeOnLAN.WakeError.self) { try WakeOnLAN.magicPacket(mac: "nope") }
     }
+
+    /// The app skips a Bonjour update that changes nothing. A changed record must not look
+    /// the same, or the app keeps an old endpoint.
+    @Test func aChangedRecordIsNotEqual() {
+        let first = DiscoveredDevice(id: "a", name: "Living Room")
+        var moved = first
+        moved.airplayEndpoint = .service(name: "Living Room", type: "_airplay._tcp", domain: "local.", interface: nil)
+        var renamed = first
+        renamed.name = "Den"
+        #expect(first == first)
+        #expect(first != moved)
+        #expect(first != renamed)
+        // One device keeps one hash, so a set still finds it after a change.
+        #expect(first.hashValue == moved.hashValue)
+    }
 }
