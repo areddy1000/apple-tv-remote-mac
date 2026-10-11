@@ -1,7 +1,7 @@
 import AppKit
 import Carbon
 
-/// A system-wide hotkey. Default: Control-Option-R summons the remote.
+/// A system-wide hotkey. Default: Control-Option-R opens the remote in the menu bar.
 /// Carbon is the only public API for this without the Accessibility permission.
 /// The app keeps one instance for its whole life, so there is no unregister path.
 @MainActor

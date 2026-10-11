@@ -8,7 +8,6 @@ struct NowPlayingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     let info: NowPlaying
-    var compact = false
 
     /// The position under the pointer while you drag the bar, as 0...1.
     @State private var scrubFraction: Double?
@@ -35,9 +34,9 @@ struct NowPlayingView: View {
             }
         }
         .padding(12)
-        // A live stream reports no length and so draws no progress bar. In the panel the
-        // card holds its height anyway, because the panel is sized by what it holds.
-        .frame(height: compact ? Tokens.compactCardHeight : nil, alignment: .top)
+        // A live stream reports no length and so draws no progress bar. The card holds its
+        // height anyway, because the menu bar panel is sized by what it holds.
+        .frame(height: Tokens.compactCardHeight, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Tokens.surfaceRaised)
@@ -53,7 +52,7 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private var artwork: some View {
-        let side: CGFloat = compact ? 40 : 48
+        let side: CGFloat = 40
         ZStack {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .fill(Tokens.surfaceHover)

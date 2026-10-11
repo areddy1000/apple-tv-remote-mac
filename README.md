@@ -1,9 +1,8 @@
 # Apple TV Remote for Mac
 
 A native macOS remote for any Apple TV on your network. The app is Swift and SwiftUI. It
-speaks the same protocol as the Siri Remote and the iPhone Remote.
-
-![The remote window](docs/screenshot.png)
+speaks the same protocol as the Siri Remote and the iPhone Remote. It lives only in the menu
+bar. It has no window and no Dock icon.
 
 ## Install
 
@@ -77,7 +76,10 @@ hook below when your volume keys do nothing.
 | Command-T | Show the text bar |
 | Command-Shift-H | TV (Home screen) |
 | Command-1 to Command-9 | Switch to another Apple TV |
-| Control-Option-R | Bring the remote window to the front from any app |
+| Control-Option-R | Open the remote in the menu bar from any app |
+| Command-Q | Quit (also in the Apple TV menu at the top of the panel) |
+
+The keys work while the menu bar panel is open.
 
 Hold an arrow key to repeat the move. Hold Return for a long press of Select.
 
@@ -91,8 +93,12 @@ Hold an arrow key to repeat the move. Hold Return for a long press of Select.
 
 ## Menu bar
 
-Click the menu bar item to show a compact remote. While media plays, the item shows the
-artwork and the title. Click the window button in the panel to open the full window.
+Click the menu bar item, or press Control-Option-R, to open the remote. While media plays, the
+item shows the artwork and the title.
+
+The Apple TV menu at the top of the panel lists the Apple TVs. It also holds Wake, Sleep,
+Screensaver, Forget This Apple TV, and Quit. When you pair a new Apple TV, the PIN entry
+shows in the panel.
 
 ## Command line tool
 

@@ -1,11 +1,9 @@
 import AppleTVKit
 import SwiftUI
 
-/// The compact remote in the menu bar panel.
+/// The remote in the menu bar panel. The app has no other window.
 struct MenuBarPanel: View {
     @Environment(DeviceStore.self) private var store
-    @Environment(\.openWindow) private var openWindow
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(spacing: 0) {
@@ -13,23 +11,21 @@ struct MenuBarPanel: View {
                 DevicePicker()
                 Spacer()
                 StatusBadge()
-                Button {
-                    openWindow(id: RemoteApp.mainWindowID)
-                    NSApp.activate(ignoringOtherApps: true)
-                    // One remote at a time. The panel folds back into the menu bar.
-                    dismiss()
-                } label: {
-                    Label("Open Window", systemImage: "macwindow")
-                        .labelStyle(.iconOnly)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(Tokens.inkSecondary)
-                .help("Open the window")
             }
             .padding(.horizontal, Tokens.inset)
             .padding(.top, 14)
-            RemoteBody(compact: true)
+            RemoteBody()
         }
         .frame(width: Tokens.compactWidth)
+        // The PIN entry covers the remote, so the panel keeps its height while you pair.
+        .overlay {
+            if store.connection == .awaitingPIN {
+                PairingSheet()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(.regularMaterial)
+                    .transition(.opacity)
+            }
+        }
+        .animation(Motion.crossfade, value: store.connection == .awaitingPIN)
     }
 }

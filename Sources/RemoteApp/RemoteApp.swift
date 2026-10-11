@@ -4,91 +4,73 @@ import SwiftUI
 
 @main
 struct RemoteApp: App {
-    static let mainWindowID = "main"
-    static let windowTitle = "Apple TV Remote"
-
-    @State private var store: DeviceStore
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var icons = AppIconStore()
-    @State private var coordinator: AppCoordinator
-    @State private var keyMonitor: KeyMonitor
-    @State private var hotKey: HotKey?
-
-    init() {
-        let store = DeviceStore()
-        _store = State(initialValue: store)
-        _coordinator = State(initialValue: AppCoordinator(store: store))
-        _keyMonitor = State(initialValue: KeyMonitor(store: store))
-    }
-
-    /// Brings the remote window to the front from any app.
-    @MainActor
-    static func summon() {
-        NSApp.activate(ignoringOtherApps: true)
-        // A closed SwiftUI window stays in the list as hidden. Ordering it front reopens it.
-        let window = NSApp.windows.first {
-            $0.identifier?.rawValue.hasPrefix(mainWindowID) == true || $0.title == windowTitle
-        }
-        window?.makeKeyAndOrderFront(nil)
-    }
 
     var body: some Scene {
-        Window(Self.windowTitle, id: Self.mainWindowID) {
-            RemoteWindow()
-                .environment(store)
-                .environment(coordinator)
-                .environment(icons)
-                .containerBackground(.ultraThinMaterial, for: .window)
-                .onAppear {
-                    keyMonitor.start()
-                    coordinator.start()
-                    if hotKey == nil { hotKey = HotKey { Self.summon() } }
-                }
-                .onOpenURL { url in coordinator.handle(url) }
-        }
-        .windowStyle(.hiddenTitleBar)
-        .windowToolbarStyle(.unified)
-        .windowResizability(.contentSize)
-        .defaultSize(width: Tokens.windowWidth, height: Tokens.windowMinHeight)
-        .commands { RemoteCommands(store: store, coordinator: coordinator) }
-
         MenuBarExtra {
             MenuBarPanel()
-                .environment(store)
-                .environment(coordinator)
+                .environment(appDelegate.store)
+                .environment(appDelegate.coordinator)
                 .environment(icons)
         } label: {
-            MenuBarLabel(store: store)
+            MenuBarLabel(store: appDelegate.store)
         }
         .menuBarExtraStyle(.window)
     }
 }
 
-/// The Remote menu. Every item maps to one command.
-struct RemoteCommands: Commands {
+/// Owns the app state and starts it at launch. The app lives only in the menu bar, so no
+/// window can start it, and URLs arrive here instead of at a window.
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
     let store: DeviceStore
     let coordinator: AppCoordinator
+    private let keyMonitor: KeyMonitor
+    private var hotKey: HotKey?
 
-    var body: some Commands {
-        CommandMenu("Remote") {
-            Button("Open App…") { store.paletteVisible.toggle() }
-                .keyboardShortcut("k", modifiers: .command)
-            Button("Type Text") { store.keyboardVisible.toggle() }
-                .keyboardShortcut("t", modifiers: .command)
-            Divider()
-            Button("Back") { store.click(.menu) }
-            Button("TV") { store.click(.home) }
-                .keyboardShortcut("h", modifiers: [.command, .shift])
-            Button("Play/Pause") { store.click(.playPause) }
-            Divider()
-            Button("Volume Up") { store.click(.volumeUp) }
-            Button("Volume Down") { store.click(.volumeDown) }
-            Divider()
-            Button("Sleep") { store.click(.sleep) }
-            Button("Wake") { coordinator.wakeSelected() }
-            Button("Screensaver") { store.click(.screensaver) }
-            Divider()
-            // The system-wide hotkey is Control-Option-R. Menus cannot show a Carbon hotkey.
-            Button("Show Remote") { RemoteApp.summon() }
+    override init() {
+        let store = DeviceStore()
+        self.store = store
+        coordinator = AppCoordinator(store: store)
+        keyMonitor = KeyMonitor(store: store)
+        super.init()
+    }
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        keyMonitor.start()
+        coordinator.start()
+        hotKey = HotKey { MenuBarPanelOpener.open() }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        urls.forEach(coordinator.handle)
+    }
+}
+
+/// Opens the menu bar panel from code, for the hotkey and for pairing.
+/// SwiftUI has no call for this, so it clicks the status item button.
+@MainActor
+enum MenuBarPanelOpener {
+    static func open() {
+        NSApp.activate(ignoringOtherApps: true)
+        // The panel window is already open: bring it to the front.
+        if let panel = NSApp.windows.first(where: { $0.isVisible && String(describing: type(of: $0)).contains("MenuBarExtra") }) {
+            panel.makeKeyAndOrderFront(nil)
+            return
         }
+        let button = NSApp.windows
+            .filter { String(describing: type(of: $0)).contains("StatusBar") }
+            .compactMap { $0.contentView.flatMap(statusButton(in:)) }
+            .first
+        button?.performClick(nil)
+    }
+
+    private static func statusButton(in view: NSView) -> NSStatusBarButton? {
+        if let button = view as? NSStatusBarButton { return button }
+        for subview in view.subviews {
+            if let button = statusButton(in: subview) { return button }
+        }
+        return nil
     }
 }

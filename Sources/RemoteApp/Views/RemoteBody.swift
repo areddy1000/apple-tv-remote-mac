@@ -1,13 +1,10 @@
 import AppleTVKit
 import SwiftUI
 
-/// The remote itself. The window and the menu bar panel both show it.
+/// The remote itself, as the menu bar panel shows it.
 struct RemoteBody: View {
     @Environment(DeviceStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    var compact = false
 
     var body: some View {
         // The remote sets the size. The palette floats over it from the top edge.
@@ -16,7 +13,7 @@ struct RemoteBody: View {
             VStack(spacing: 16) {
                 if let info = store.nowPlaying {
                     // The card slides in from the top and pushes the remote down.
-                    NowPlayingView(info: info, compact: compact)
+                    NowPlayingView(info: info)
                         .transition(
                             reduceMotion
                                 ? .opacity
@@ -25,43 +22,22 @@ struct RemoteBody: View {
                                     removal: .opacity
                                 )
                         )
-                } else if compact {
+                } else {
                     // The panel keeps its height, so this slot never empties.
                     StatusCard()
                         .transition(.opacity)
                 }
-                // The window bounds the clickpad. The menu bar panel does not, so it gets a fixed height.
+                // The menu bar panel does not bound the clickpad, so it gets a fixed height.
                 TouchSurfaceView()
-                    .frame(height: compact ? 220 : nil)
-                    .frame(minHeight: compact ? nil : 230)
-                TransportBar(compact: compact)
+                    .frame(height: 220)
+                TransportBar()
                 if store.keyboardVisible {
                     KeyboardBar()
                         .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6)))
                 }
-                if let error = store.lastError, !compact {
-                    HStack(spacing: 6) {
-                        Text(error)
-                            .font(Tokens.caption)
-                            .foregroundStyle(Tokens.danger)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                        Image(systemName: "xmark.circle.fill")
-                            .font(Tokens.caption)
-                            .foregroundStyle(Tokens.inkTertiary)
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture { store.lastError = nil }
-                    .help("Click to dismiss")
-                    .accessibilityElement(children: .combine)
-                    .accessibilityHint("Click to dismiss")
-                    .transition(.opacity)
-                }
             }
             .padding(Tokens.inset)
-            .animation(compact ? nil : (reduceMotion ? Motion.reduced : Motion.panelOpen), value: store.keyboardVisible)
             .animation(reduceMotion ? Motion.reduced : Motion.panelOpen, value: store.nowPlaying == nil)
-            .animation(Motion.crossfade, value: store.lastError)
 
             if store.paletteVisible {
                 Color.black.opacity(0.001)
@@ -69,12 +45,12 @@ struct RemoteBody: View {
                     .onTapGesture {
                         withAnimation(reduceMotion ? Motion.reduced : Motion.panelClose) { store.paletteVisible = false }
                     }
-                AppLauncherPalette(compact: compact)
+                AppLauncherPalette()
                     .transition(reduceMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .top)))
                     .padding(.top, 12)
             }
         }
         .animation(reduceMotion ? Motion.reduced : (store.paletteVisible ? Motion.panelOpen : Motion.panelClose), value: store.paletteVisible)
-        .frame(width: compact ? Tokens.compactWidth : Tokens.windowWidth)
+        .frame(width: Tokens.compactWidth)
     }
 }

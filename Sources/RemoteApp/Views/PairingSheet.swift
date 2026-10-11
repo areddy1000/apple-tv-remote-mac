@@ -1,7 +1,7 @@
 import AppleTVKit
 import SwiftUI
 
-/// Asks for the four-digit PIN the Apple TV shows.
+/// Asks for the four-digit PIN the Apple TV shows. It covers the remote in the menu bar panel.
 struct PairingSheet: View {
     @Environment(DeviceStore.self) private var store
     @Environment(AppCoordinator.self) private var coordinator
@@ -32,7 +32,6 @@ struct PairingSheet: View {
             }
         }
         .padding(28)
-        .frame(width: 320)
         .onAppear { focused = true }
     }
 }

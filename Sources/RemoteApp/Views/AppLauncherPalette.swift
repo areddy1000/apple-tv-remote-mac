@@ -6,9 +6,6 @@ struct AppLauncherPalette: View {
     @Environment(DeviceStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// True in the menu bar panel. The palette fits the panel width and shows fewer rows.
-    var compact = false
-
     @State private var query = ""
     @State private var selection = 0
     @FocusState private var focused: Bool
@@ -59,7 +56,7 @@ struct AppLauncherPalette: View {
                     }
                     .padding(6)
                 }
-                .frame(maxHeight: compact ? 220 : 280)
+                .frame(maxHeight: 220)
                 .onChange(of: selection) { _, index in
                     if results.indices.contains(index) {
                         reader.scrollTo(results[index].id, anchor: .center)
@@ -67,7 +64,7 @@ struct AppLauncherPalette: View {
                 }
             }
         }
-        .frame(width: (compact ? Tokens.compactWidth : Tokens.windowWidth) - 2 * Tokens.inset)
+        .frame(width: Tokens.compactWidth - 2 * Tokens.inset)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Tokens.edge, lineWidth: 0.5))
         .shadow(color: .black.opacity(0.25), radius: 24, y: 10)

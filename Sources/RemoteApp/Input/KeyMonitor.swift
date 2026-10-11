@@ -19,6 +19,9 @@ final class KeyMonitor {
         static let right: UInt16 = 124
         static let down: UInt16 = 125
         static let up: UInt16 = 126
+        static let h: UInt16 = 4
+        static let t: UInt16 = 17
+        static let k: UInt16 = 40
     }
 
     private var monitor: Any?
@@ -45,6 +48,8 @@ final class KeyMonitor {
     }
 
     private func handle(_ event: NSEvent) -> NSEvent? {
+        // The app lives only in the menu bar, so it has no menus for these shortcuts.
+        if event.type == .keyDown, !event.isARepeat, handleShortcut(event) { return nil }
         // A key-up for a button that is down always releases it, whatever has focus.
         if event.type == .keyUp, let button = button(for: event) ?? commandButton(for: event),
            store.pressedButtons.contains(button) {
@@ -89,6 +94,19 @@ final class KeyMonitor {
         case KeyCode.pageDown: .pageDown
         default: nil
         }
+    }
+
+    /// Command-K opens the app palette, Command-T the keyboard bar, Command-Shift-H the TV button.
+    /// Returns true when the event was a shortcut.
+    private func handleShortcut(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
+        switch (event.keyCode, flags) {
+        case (KeyCode.k, [.command]): store.paletteVisible.toggle()
+        case (KeyCode.t, [.command]): store.keyboardVisible.toggle()
+        case (KeyCode.h, [.command, .shift]): store.click(.home)
+        default: return false
+        }
+        return true
     }
 
     /// Command-Up and Command-Down change the volume.

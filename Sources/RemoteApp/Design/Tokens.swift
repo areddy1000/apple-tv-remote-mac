@@ -27,8 +27,6 @@ enum Tokens {
 
     // MARK: Geometry
 
-    static let windowWidth: CGFloat = 340
-    static let windowMinHeight: CGFloat = 560
     static let compactWidth: CGFloat = 300
     static let buttonSize: CGFloat = 54
     static let buttonSizeCompact: CGFloat = 46

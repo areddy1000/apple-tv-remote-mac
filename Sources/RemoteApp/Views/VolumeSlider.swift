@@ -7,10 +7,6 @@ struct VolumeSlider: View {
     @Environment(DeviceStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// Holds the slot open when no level is known. The menu bar panel takes its height
-    /// from what it holds, so it must not change when the output does.
-    var reserveSpace = false
-
     @State private var dragging = false
     @State private var hovering = false
 
@@ -71,8 +67,9 @@ struct VolumeSlider: View {
             .transition(.opacity)
         } else if store.volumeUnavailable {
             VolumeUnavailableNotice(height: knob + 6)
-        } else if reserveSpace {
-            // The slot keeps the panel's height, so it must still look like a volume row.
+        } else {
+            // The menu bar panel takes its height from what it holds, so the slot stays open
+            // and still looks like a volume row.
             // An empty band here shows the desktop through the panel.
             RestingVolumeRow(trackHeight: trackHeight, knob: knob)
         }

@@ -1,8 +1,9 @@
 import AppleTVKit
 import SwiftUI
 
-/// Toolbar menu that lists the Apple TVs on the network.
-/// The first nine get Command-1 to Command-9.
+/// The menu that lists the Apple TVs on the network.
+/// The first nine get Command-1 to Command-9. The app has no menu bar of its own,
+/// so this menu also holds the power actions and Quit.
 struct DevicePicker: View {
     @Environment(DeviceStore.self) private var store
     @Environment(AppCoordinator.self) private var coordinator
@@ -20,6 +21,13 @@ struct DevicePicker: View {
             Divider()
             Button("Forget This Apple TV…") { coordinator.forgetSelected() }
                 .disabled(store.selectedDeviceID == nil)
+            Divider()
+            Button("Wake") { coordinator.wakeSelected() }
+            Button("Sleep") { store.click(.sleep) }
+            Button("Screensaver") { store.click(.screensaver) }
+            Divider()
+            Button("Quit Apple TV Remote") { NSApplication.shared.terminate(nil) }
+                .keyboardShortcut("q", modifiers: .command)
         } label: {
             HStack(spacing: 7) {
                 Circle()

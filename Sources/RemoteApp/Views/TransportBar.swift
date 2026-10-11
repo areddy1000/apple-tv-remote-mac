@@ -3,9 +3,7 @@ import SwiftUI
 
 /// The physical buttons below the clickpad, then the volume slider.
 struct TransportBar: View {
-    var compact = false
-
-    private var size: CGFloat { compact ? Tokens.buttonSizeCompact : Tokens.buttonSize }
+    private let size = Tokens.buttonSizeCompact
 
     var body: some View {
         VStack(spacing: Tokens.buttonSpacing) {
@@ -20,7 +18,7 @@ struct TransportBar: View {
                 RemoteButtonView(button: .siri, size: size)
                 PowerButtonView(size: size)
             }
-            VolumeSlider(reserveSpace: compact)
+            VolumeSlider()
         }
     }
 }
