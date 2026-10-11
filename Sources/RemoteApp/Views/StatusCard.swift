@@ -98,6 +98,8 @@ struct StatusCard: View {
         case .idle:
             if store.devices.isEmpty { "Looking for an Apple TV." }
             else if store.selectedDeviceID == nil { "Choose an Apple TV above." }
+            // Without a pairing, a press shows the Pair button. It cannot connect.
+            else if store.connection == .needsPairing { "Not paired. Press any button to pair." }
             else { "Press any button to connect." }
         case .busy:
             "This takes a moment."

@@ -147,6 +147,7 @@ final class DeviceStore {
 
     /// Sets the level from the slider. Sends at most one request each 60 ms.
     func setVolume(_ level: Double) {
+        requestConnection()
         volume = level
         pendingVolume = level
         guard volumeSendTask == nil else { return }
@@ -199,6 +200,7 @@ final class DeviceStore {
 
     /// Wakes a sleeping TV, or puts an awake TV to sleep.
     func togglePower() {
+        requestConnection()
         guard let controller else { return }
         let wasAsleep = power == .asleep
         Task { [weak self] in
