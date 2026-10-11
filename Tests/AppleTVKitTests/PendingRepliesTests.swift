@@ -81,3 +81,55 @@ struct PendingRepliesTests {
         #expect(replies.isEmpty)
     }
 }
+
+/// A socket open gets one result. A timer that comes late must not close a good socket.
+@Suite("ResumeOnceTests")
+struct ResumeOnceTests {
+    @Test func onlyTheFirstResultGoesOut() async throws {
+        let value: Int = try await withCheckedThrowingContinuation { continuation in
+            let once = ResumeOnce(continuation)
+            #expect(once.resume(.success(1)))
+            #expect(!once.resume(.success(2)))
+        }
+        #expect(value == 1)
+    }
+
+    @Test func aLateTimerDoesNothing() async throws {
+        let fired = ResumeFlag()
+        let queue = DispatchQueue(label: "test.resume")
+        let value: Int = try await withCheckedThrowingContinuation { continuation in
+            let once = ResumeOnce(continuation)
+            once.fail(after: 0.01, on: queue, with: CompanionError.timeout) { fired.set() }
+            once.resume(.success(7))
+        }
+        #expect(value == 7)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(!fired.isSet)
+    }
+
+    @Test func aTimerFailsAnOpenThatGotNoResult() async {
+        let fired = ResumeFlag()
+        let queue = DispatchQueue(label: "test.resume")
+        do {
+            let _: Int = try await withCheckedThrowingContinuation { continuation in
+                ResumeOnce(continuation).fail(after: 0.01, on: queue, with: CompanionError.timeout) { fired.set() }
+            }
+            Issue.record("the open must fail")
+        } catch {
+            #expect(error as? CompanionError == .timeout)
+        }
+        // The close runs just after the result, on the timer queue.
+        for _ in 0..<50 where !fired.isSet {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(fired.isSet)
+    }
+}
+
+/// A flag that a timer sets from its queue.
+private final class ResumeFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
+}

@@ -169,9 +169,16 @@ public actor DataStreamChannel {
                 case .cancelled:
                     box.resume(.failure(AirPlayHTTPError.closed))
                     Task { await self.close() }
+                case .waiting(let error):
+                    // A waiting socket tries again by itself, for ever. Fail the open instead.
+                    box.resume(.failure(AirPlayHTTPError.failed(error.localizedDescription)))
+                    Task { await self.close() }
                 default:
                     break
                 }
+            }
+            box.fail(after: SocketLimits.openTimeout, on: queue, with: AirPlayHTTPError.timeout("open")) { [weak self] in
+                Task { await self?.close() }
             }
             connection.start(queue: queue)
         }
@@ -240,8 +247,9 @@ public actor DataStreamChannel {
         }
     }
 
+    /// Cancels the socket and ends the message stream.
+    /// It always cancels, also for a socket that never opened. A second call does no harm.
     public func close() {
-        guard isOpen else { return }
         isOpen = false
         connection.cancel()
         messagesContinuation.finish()

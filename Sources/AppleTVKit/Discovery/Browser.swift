@@ -139,29 +139,44 @@ public actor DeviceBrowser {
         }
         let connection = NWConnection(to: endpoint, using: parameters)
         let queue = DispatchQueue(label: "atv.discovery.resolve")
-        return try await withCheckedThrowingContinuation { continuation in
-            let once = ResumeOnce(continuation)
-            connection.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    guard case .hostPort(let host, let port)? = connection.currentPath?.remoteEndpoint else {
-                        once.resume(.failure(ResolveError.noRemoteEndpoint))
-                        connection.cancel()
-                        return
-                    }
-                    // Resume first. A cancel can report the cancelled state before this handler returns.
-                    once.resume(.success((Self.hostText(host), port.rawValue)))
-                    connection.cancel()
-                case .failed(let error):
-                    connection.cancel()
-                    once.resume(.failure(error))
-                case .cancelled:
+        let gate = CancelGate<(host: String, port: UInt16)>()
+        // A cancel of the caller cancels the socket. Without this a timeout cannot end the wait.
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let once = ResumeOnce(continuation)
+                guard gate.install(once) else {
                     once.resume(.failure(ResolveError.cancelled))
-                default:
-                    break
+                    return
                 }
+                connection.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready:
+                        guard case .hostPort(let host, let port)? = connection.currentPath?.remoteEndpoint else {
+                            once.resume(.failure(ResolveError.noRemoteEndpoint))
+                            connection.cancel()
+                            return
+                        }
+                        // Resume first. A cancel can report the cancelled state before this handler returns.
+                        once.resume(.success((Self.hostText(host), port.rawValue)))
+                        connection.cancel()
+                    case .failed(let error):
+                        connection.cancel()
+                        once.resume(.failure(error))
+                    case .waiting(let error):
+                        // A waiting socket tries again by itself, for ever. Fail instead.
+                        connection.cancel()
+                        once.resume(.failure(error))
+                    case .cancelled:
+                        once.resume(.failure(ResolveError.cancelled))
+                    default:
+                        break
+                    }
+                }
+                connection.start(queue: queue)
             }
-            connection.start(queue: queue)
+        } onCancel: {
+            gate.cancel()
+            connection.cancel()
         }
     }
 
@@ -178,5 +193,33 @@ public actor DeviceBrowser {
     public enum ResolveError: Error {
         case noRemoteEndpoint
         case cancelled
+    }
+}
+
+/// Ends a wait when the task is cancelled, also before the wait has started.
+///
+/// `@unchecked Sendable`: the lock guards both mutable fields.
+private final class CancelGate<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var once: ResumeOnce<T>?
+    private var cancelled = false
+
+    /// Keeps the wait. Returns false when the task is already cancelled.
+    func install(_ once: ResumeOnce<T>) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !cancelled else { return false }
+        self.once = once
+        return true
+    }
+
+    /// Fails the wait, or marks the gate so a later wait fails at once.
+    func cancel() {
+        lock.lock()
+        cancelled = true
+        let pending = once
+        once = nil
+        lock.unlock()
+        pending?.resume(.failure(DeviceBrowser.ResolveError.cancelled))
     }
 }

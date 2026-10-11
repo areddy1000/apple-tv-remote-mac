@@ -58,10 +58,16 @@ public actor CompanionConnection {
                     once.resume(.failure(CompanionConnectionError.cancelled))
                     Task { await self.close() }
                 case .waiting(let error):
+                    // A waiting socket tries again by itself, for ever. Fail the open instead.
                     ATVLog.companion.info("waiting: \(error.localizedDescription, privacy: .public)")
+                    once.resume(.failure(CompanionConnectionError.failed(error.localizedDescription)))
+                    Task { await self.close() }
                 default:
                     break
                 }
+            }
+            once.fail(after: SocketLimits.openTimeout, on: queue, with: CompanionConnectionError.failed("The Apple TV did not answer.")) { [weak self] in
+                Task { await self?.close() }
             }
             connection.start(queue: queue)
         }
