@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// Design tokens. Every color, size and radius in the app comes from here.
@@ -23,7 +24,12 @@ enum Tokens {
     static let inkSecondary = Color.secondary
     static let inkTertiary = Color.primary.opacity(0.35)
     static let accent = Color.accentColor
-    static let danger = Color.red
+    /// A muted red for errors. The system red is too bright for text in a small panel.
+    static let danger = Color(nsColor: NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            ? NSColor(srgbRed: 0xD9 / 255, green: 0x8C / 255, blue: 0x84 / 255, alpha: 1)
+            : NSColor(srgbRed: 0xA8 / 255, green: 0x46 / 255, blue: 0x3F / 255, alpha: 1)
+    })
 
     // MARK: Geometry
 
