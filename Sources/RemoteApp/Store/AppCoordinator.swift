@@ -14,6 +14,10 @@ final class AppCoordinator {
     private var browseTask: Task<Void, Never>?
     private var pinContinuation: CheckedContinuation<String?, Never>?
     private var controllers: [String: AppleTVDevice] = [:]
+    /// The stored records, for the device list.
+    private var stored: [String: StoredDevice] = [:]
+    /// The app connects by itself one time, at launch, and only to a paired Apple TV.
+    private var launchConnectDone = false
 
     private static let lastDeviceKey = "atv.lastDevice"
 
@@ -27,13 +31,16 @@ final class AppCoordinator {
             store.attach(MockController(), name: "Mock Apple TV")
             return
         }
-        Task { try? await credentials.load() }
         browseTask = Task { [weak self] in
             guard let self else { return }
+            // The launch connection needs to know which Apple TVs are paired, so load first.
+            try? await self.credentials.load()
+            await self.refreshKnown()
             await self.browser.start()
             for await devices in self.browser.devices {
                 self.store.devices = devices
-                self.autoSelect()
+                self.publishKnown()
+                self.connectAtLaunch()
                 // Endpoints can arrive after the first sighting. Pass the fresh record on.
                 for device in devices {
                     if let controller = self.controllers[device.id] {
@@ -44,20 +51,68 @@ final class AppCoordinator {
         }
     }
 
-    /// Picks the last used device, else the first found.
-    private func autoSelect() {
-        guard store.selectedDeviceID == nil, !store.devices.isEmpty else { return }
+    /// Reads the stored records again and updates the device list.
+    func refreshKnown() async {
+        stored = (try? await credentials.allDevices()) ?? [:]
+        publishKnown()
+    }
+
+    private func publishKnown() {
+        store.knownDevices = KnownDevice.merge(discovered: store.devices, stored: stored)
+    }
+
+    /// Connects one time at launch to a paired Apple TV: the last used one, else the first.
+    /// An Apple TV with no pairing never connects by itself, because a PIN turns the television on.
+    private func connectAtLaunch() {
+        guard !launchConnectDone, store.selectedDeviceID == nil else { return }
+        let paired = store.devices.filter { stored[$0.id]?.companion != nil }
+        guard !paired.isEmpty else { return }
+        launchConnectDone = true
         let lastUsed = UserDefaults.standard.string(forKey: Self.lastDeviceKey)
-        if let device = store.devices.first(where: { $0.id == lastUsed }) ?? store.devices.first {
+        if let device = paired.first(where: { $0.id == lastUsed }) ?? paired.first {
             select(device)
         }
     }
 
+    /// Connects to a device from the list. It never asks for a PIN.
+    func connect(id: String) {
+        guard let device = store.devices.first(where: { $0.id == id }) else { return }
+        select(device)
+    }
+
+    /// Pairs a device from the list. The Apple TV shows a PIN, and the panel asks for it.
+    func pair(id: String) {
+        guard let device = store.devices.first(where: { $0.id == id }) else { return }
+        let controller = controller(for: device)
+        store.attach(controller, name: device.name, connect: false)
+        UserDefaults.standard.set(device.id, forKey: Self.lastDeviceKey)
+        Task { await controller.pair() }
+    }
+
+    /// Ends the link and goes back to the device list.
+    func disconnect() {
+        if let id = store.selectedDeviceID, let controller = controllers[id] {
+            Task { await controller.disconnect() }
+        }
+        store.detach()
+    }
+
     func select(_ device: DiscoveredDevice) {
-        guard device.id != store.selectedDeviceID || store.controller == nil else { return }
+        if device.id == store.selectedDeviceID, let controller = store.controller {
+            // The same Apple TV after a failure: try again on the attached controller.
+            if !store.connection.isConnected, !store.connection.isBusy {
+                Task { await controller.connect() }
+            }
+            return
+        }
         ATVLog.companion.info("selected \(device.name, privacy: .public)")
         UserDefaults.standard.set(device.id, forKey: Self.lastDeviceKey)
-        let controller = controllers[device.id] ?? AppleTVDevice(
+        store.attach(controller(for: device), name: device.name)
+    }
+
+    private func controller(for device: DiscoveredDevice) -> AppleTVDevice {
+        if let controller = controllers[device.id] { return controller }
+        let controller = AppleTVDevice(
             device: device,
             identity: identity,
             store: credentials,
@@ -67,20 +122,17 @@ final class AppCoordinator {
             }
         )
         controllers[device.id] = controller
-        store.attach(controller, name: device.name)
+        return controller
     }
 
-    /// Removes the stored pairing for the selected TV and connects again, which asks for a PIN.
+    /// Removes the stored pairing for the selected TV and goes back to the device list.
     func forgetSelected() {
         guard let id = store.selectedDeviceID, let controller = controllers[id] else { return }
+        store.detach()
         Task {
             await controller.forget()
             controllers[id] = nil
-            store.connection = .idle
-            if let device = store.devices.first(where: { $0.id == id }) {
-                store.selectedDeviceID = nil
-                select(device)
-            }
+            await refreshKnown()
         }
     }
 

@@ -1,23 +1,37 @@
 import AppleTVKit
 import SwiftUI
 
-/// The remote in the menu bar panel. The app has no other window.
+/// The menu bar panel. With a link it shows the remote. Without one it shows the device list.
 struct MenuBarPanel: View {
     @Environment(DeviceStore.self) private var store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack {
-                DevicePicker()
-                Spacer()
-                StatusBadge()
+        // The remote stays in the layout under the list, so the panel keeps one height.
+        // The menu bar window does not follow a change in content height well.
+        ZStack(alignment: .top) {
+            VStack(spacing: 0) {
+                HStack {
+                    DevicePicker()
+                    Spacer()
+                    StatusBadge()
+                }
+                .padding(.horizontal, Tokens.inset)
+                .padding(.top, 14)
+                RemoteBody()
             }
-            .padding(.horizontal, Tokens.inset)
-            .padding(.top, 14)
-            RemoteBody()
+            .opacity(store.showsRemote ? 1 : 0)
+            .allowsHitTesting(store.showsRemote)
+            .accessibilityHidden(!store.showsRemote)
+
+            if !store.showsRemote {
+                DeviceListView()
+                    .transition(.opacity)
+            }
         }
         .frame(width: Tokens.compactWidth)
-        // The PIN entry covers the remote, so the panel keeps its height while you pair.
+        .animation(reduceMotion ? Motion.reduced : Motion.crossfade, value: store.showsRemote)
+        // The PIN entry covers the panel, so the panel keeps its height while you pair.
         .overlay {
             if store.connection == .awaitingPIN {
                 PairingSheet()
@@ -27,7 +41,5 @@ struct MenuBarPanel: View {
             }
         }
         .animation(Motion.crossfade, value: store.connection == .awaitingPIN)
-        // The pairing prompt and errors show only after a request in this panel visit.
-        .onDisappear { store.connectionRequested = false }
     }
 }

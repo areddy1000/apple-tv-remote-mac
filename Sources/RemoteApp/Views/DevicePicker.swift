@@ -1,9 +1,9 @@
 import AppleTVKit
 import SwiftUI
 
-/// The menu that lists the Apple TVs on the network.
-/// The first nine get Command-1 to Command-9. The app has no menu bar of its own,
-/// so this menu also holds the power actions and Quit.
+/// The menu at the top of the remote. It names the connected Apple TV.
+/// The app has no menu bar of its own, so this menu also holds the power actions and Quit.
+/// Switching Apple TVs goes through the device list, which Disconnect shows.
 struct DevicePicker: View {
     @Environment(DeviceStore.self) private var store
     @Environment(AppCoordinator.self) private var coordinator
@@ -12,13 +12,7 @@ struct DevicePicker: View {
         Menu {
             Text(store.statusText)
             Divider()
-            if store.devices.isEmpty {
-                Text("Looking for Apple TVs…")
-            }
-            ForEach(Array(store.devices.enumerated()), id: \.element.id) { index, device in
-                deviceButton(device, shortcut: index < 9 ? Character(String(index + 1)) : nil)
-            }
-            Divider()
+            Button("Disconnect") { coordinator.disconnect() }
             Button("Forget This Apple TV…") { coordinator.forgetSelected() }
                 .disabled(store.selectedDeviceID == nil)
             Divider()
@@ -40,25 +34,7 @@ struct DevicePicker: View {
             }
         }
         .menuIndicator(.visible)
-        .help("Choose an Apple TV")
+        .help("Apple TV actions")
         .accessibilityLabel("Apple TV: \(store.selectedName), \(store.statusText)")
-    }
-
-    @ViewBuilder
-    private func deviceButton(_ device: DiscoveredDevice, shortcut: Character?) -> some View {
-        let button = Button {
-            coordinator.select(device)
-        } label: {
-            if device.id == store.selectedDeviceID {
-                Label(device.name, systemImage: "checkmark")
-            } else {
-                Text(device.name)
-            }
-        }
-        if let shortcut {
-            button.keyboardShortcut(KeyEquivalent(shortcut), modifiers: .command)
-        } else {
-            button
-        }
     }
 }

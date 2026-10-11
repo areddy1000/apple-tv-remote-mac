@@ -75,7 +75,6 @@ hook below when your volume keys do nothing.
 | Command-K | Open an app. Type to filter. Press Return to launch |
 | Command-T | Show the text bar |
 | Command-Shift-H | TV (Home screen) |
-| Command-1 to Command-9 | Switch to another Apple TV |
 | Control-Option-R | Open the remote in the menu bar from any app |
 | Command-Q | Quit (also in the Apple TV menu at the top of the panel) |
 
@@ -96,9 +95,15 @@ Hold an arrow key to repeat the move. Hold Return for a long press of Select.
 Click the menu bar item, or press Control-Option-R, to open the remote. While media plays, the
 item shows the artwork and the title.
 
-The Apple TV menu at the top of the panel lists the Apple TVs. It also holds Wake, Sleep,
-Screensaver, Forget This Apple TV, and Quit. When you pair a new Apple TV, the PIN entry
-shows in the panel.
+At launch, the app connects by itself only to a paired Apple TV, the last used one first.
+Without a link, the panel shows the list of known Apple TVs: the ones on the network, and the
+paired ones that are away. Click an Apple TV to open it. There you can connect to a paired
+Apple TV, or pair a new one. Nothing connects or pairs until you click. A pairing shows a PIN
+on the TV, which turns the TV on.
+
+With a link, the Apple TV menu at the top of the panel holds Disconnect, Forget This Apple TV,
+Wake, Sleep, Screensaver, and Quit. Disconnect goes back to the list. If the link drops, the
+app tries one time to connect again. If that fails, the panel shows the list.
 
 ## Command line tool
 

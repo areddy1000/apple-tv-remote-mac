@@ -68,9 +68,8 @@ final class DeviceStore {
     var keyboardVisible = false
     /// True while the user drags the volume slider. TV reports are ignored then.
     var volumeDragging = false
-    /// True after the user asks for something while no link is up. Until then the panel
-    /// stays calm and shows no pairing prompt or error. Closing the panel clears it.
-    var connectionRequested = false
+    /// The Apple TVs for the device list: found on the network, paired, or both.
+    var knownDevices: [KnownDevice] = []
 
     // MARK: Controller
 
@@ -85,8 +84,15 @@ final class DeviceStore {
     /// The shortest gap between two volume requests while the slider moves.
     private static let volumeSendInterval: Duration = .milliseconds(60)
 
+    /// The panel shows the remote only with a link, or while one starts. Otherwise it shows
+    /// the device list, so no button can act on a TV that is not connected.
+    var showsRemote: Bool {
+        connection.isConnected || connection.isBusy
+    }
+
     /// Connects the UI to a controller. Any previous controller disconnects first.
-    func attach(_ controller: any RemoteController, name: String) {
+    /// With `connect` false, the caller starts the link itself, for example to pair.
+    func attach(_ controller: any RemoteController, name: String, connect: Bool = true) {
         eventTask?.cancel()
         pollTask?.cancel()
         volumeSendTask?.cancel()
@@ -111,7 +117,31 @@ final class DeviceStore {
                 self.apply(event)
             }
         }
-        Task { await controller.connect() }
+        if connect {
+            Task { await controller.connect() }
+        }
+    }
+
+    /// Lets go of the controller and goes back to the device list.
+    func detach() {
+        eventTask?.cancel()
+        pollTask?.cancel()
+        volumeSendTask?.cancel()
+        volumeSendTask = nil
+        pendingVolume = nil
+        controller = nil
+        selectedDeviceID = nil
+        selectedName = "Apple TV"
+        nowPlaying = nil
+        apps = []
+        textInput = .inactive
+        volume = nil
+        volumeChecked = false
+        power = .unknown
+        paletteVisible = false
+        keyboardVisible = false
+        pressedButtons = []
+        connection = .idle
     }
 
     private func apply(_ event: DeviceEvent) {
@@ -120,7 +150,6 @@ final class DeviceStore {
             connection = state
             if case .failed(let message) = state { lastError = message }
             if state == .connected {
-                connectionRequested = false
                 lastError = nil
                 refreshVolume()
                 startPolling()
@@ -147,7 +176,6 @@ final class DeviceStore {
 
     /// Sets the level from the slider. Sends at most one request each 60 ms.
     func setVolume(_ level: Double) {
-        requestConnection()
         volume = level
         pendingVolume = level
         guard volumeSendTask == nil else { return }
@@ -184,8 +212,6 @@ final class DeviceStore {
 
     /// The rest state the status card shows. Highest trouble first.
     var status: PanelStatus {
-        // Without a link, the panel stays calm until the user asks for something.
-        if !connection.isConnected, !connection.isBusy, !connectionRequested { return .idle }
         if connection == .needsPairing { return .needsPairing }
         if case .failed(let message) = connection { return .problem(message) }
         if let error = lastError, !connection.isConnected { return .problem(error) }
@@ -200,7 +226,6 @@ final class DeviceStore {
 
     /// Wakes a sleeping TV, or puts an awake TV to sleep.
     func togglePower() {
-        requestConnection()
         guard let controller else { return }
         let wasAsleep = power == .asleep
         Task { [weak self] in
@@ -235,18 +260,8 @@ final class DeviceStore {
 
     // MARK: Input
 
-    /// Called by each user action. Without a link, it shows what is wrong and tries to connect.
-    /// A missing pairing only shows the Pair button, because a PIN turns the television on.
-    func requestConnection() {
-        guard !connection.isConnected else { return }
-        connectionRequested = true
-        guard connection != .needsPairing, !connection.isBusy, let controller else { return }
-        Task { await controller.connect() }
-    }
-
     /// Sends a button down and marks it pressed. The socket write happens on the controller.
     func buttonDown(_ button: RemoteButton) {
-        requestConnection()
         guard !pressedButtons.contains(button) else { return }
         pressedButtons.insert(button)
         controller?.button(button, down: true)
@@ -266,7 +281,6 @@ final class DeviceStore {
 
     /// A full click for menus, scripting and the palette.
     func click(_ button: RemoteButton) {
-        requestConnection()
         controller?.press(button)
         flash(button)
     }
@@ -281,7 +295,6 @@ final class DeviceStore {
     }
 
     func touch(_ event: TouchEvent) {
-        requestConnection()
         controller?.touch(event)
     }
 
@@ -308,7 +321,6 @@ final class DeviceStore {
     }
 
     func loadApps() {
-        requestConnection()
         guard let controller else { return }
         Task { [weak self] in
             do {
@@ -326,7 +338,6 @@ final class DeviceStore {
 
     /// Runs one controller call and shows its error, if any.
     private func perform(_ action: @escaping @Sendable (any RemoteController) async throws -> Void) {
-        requestConnection()
         guard let controller else { return }
         Task { [weak self] in
             do {
@@ -354,9 +365,8 @@ final class DeviceStore {
     var statusColor: Color {
         switch connection {
         case .connected: power == .asleep ? Tokens.inkTertiary : .green
-        case .needsPairing: connectionRequested ? .orange : Tokens.inkTertiary
-        case .connecting, .reconnecting, .pairing, .awaitingPIN: .orange
-        case .failed: connectionRequested ? Tokens.danger : Tokens.inkTertiary
+        case .connecting, .reconnecting, .pairing, .awaitingPIN, .needsPairing: .orange
+        case .failed: Tokens.danger
         case .idle: Tokens.inkTertiary
         }
     }

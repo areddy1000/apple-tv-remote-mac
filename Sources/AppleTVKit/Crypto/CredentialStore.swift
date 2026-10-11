@@ -46,6 +46,12 @@ public actor CredentialStore {
         return devices[identifier]
     }
 
+    /// Every stored record, keyed by device identifier.
+    public func allDevices() throws -> [String: StoredDevice] {
+        try loadIfNeeded()
+        return devices
+    }
+
     public func save(_ device: StoredDevice, for identifier: String) throws {
         try loadIfNeeded()
         devices[identifier] = device
