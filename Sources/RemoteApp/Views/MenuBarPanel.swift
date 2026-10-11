@@ -41,5 +41,8 @@ struct MenuBarPanel: View {
             }
         }
         .animation(Motion.crossfade, value: store.connection == .awaitingPIN)
+        // The store polls the TV less while the panel is closed.
+        .onAppear { store.panelVisible = true }
+        .onDisappear { store.panelVisible = false }
     }
 }

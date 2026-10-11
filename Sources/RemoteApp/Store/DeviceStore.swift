@@ -70,6 +70,13 @@ final class DeviceStore {
     var volumeDragging = false
     /// The Apple TVs on the network now, for the device list.
     var knownDevices: [KnownDevice] = []
+    /// True while the menu bar panel is open. With the panel closed the store polls less.
+    var panelVisible = false {
+        didSet {
+            guard panelVisible != oldValue else { return }
+            panelVisibilityChanged()
+        }
+    }
 
     // MARK: Controller
 
@@ -79,8 +86,11 @@ final class DeviceStore {
     private var volumeSendTask: Task<Void, Never>?
     private var pendingVolume: Double?
 
-    /// How often the store asks the TV for its power and volume state.
-    private static let pollInterval: Duration = .seconds(15)
+    /// How often the store asks the TV for its power state while the panel is open.
+    private static let visiblePollInterval: Duration = .seconds(15)
+    /// How often the store asks while the panel is closed. The power state still closes
+    /// the AirPlay tunnel when the TV sleeps.
+    private static let hiddenPollInterval: Duration = .seconds(60)
     /// The shortest gap between two volume requests while the slider moves.
     private static let volumeSendInterval: Duration = .milliseconds(60)
 
@@ -150,6 +160,11 @@ final class DeviceStore {
         switch event {
         case .connection(let state):
             connection = state
+            if !state.isConnected {
+                // Nothing to ask without a link.
+                pollTask?.cancel()
+                pollTask = nil
+            }
             if case .failed(let message) = state { lastError = message }
             if state == .connected {
                 lastError = nil
@@ -249,17 +264,37 @@ final class DeviceStore {
         }
     }
 
-    /// Polls power and volume while connected. The TV does not push power changes.
+    /// Polls the power state while connected. The TV does not push power changes.
+    /// The volume shows only in the open panel, so only the open panel polls it.
+    /// The loop ends when the link ends. The next connect starts it again.
     private func startPolling() {
         pollTask?.cancel()
+        pollTask = nil
+        guard connection.isConnected else { return }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: Self.pollInterval)
-                guard let self, self.connection.isConnected else { continue }
+                guard let interval = self?.pollInterval else { return }
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled, let self, self.connection.isConnected else { return }
                 self.refreshPower()
-                self.refreshVolume()
+                // A sleeping TV reports no volume, so a request is a waste.
+                if self.panelVisible, self.power != .asleep { self.refreshVolume() }
             }
         }
+    }
+
+    private var pollInterval: Duration {
+        panelVisible ? Self.visiblePollInterval : Self.hiddenPollInterval
+    }
+
+    /// Reads fresh state when the panel opens, and sets the poll rate for the new state.
+    private func panelVisibilityChanged() {
+        guard connection.isConnected else { return }
+        if panelVisible {
+            refreshPower()
+            if power != .asleep { refreshVolume() }
+        }
+        startPolling()
     }
 
     // MARK: Input
