@@ -10,6 +10,8 @@ public enum DeviceError: Error, Sendable, Equatable {
     /// The app never pairs on its own, because pairing puts a PIN on the screen and turns
     /// the television on. The user starts it with `pair()`.
     case needsPairing
+    /// The pairing worked. The app opens a new connection to use it.
+    case pairedStartAgain
 }
 
 /// A command queued from the UI. The queue keeps down and up in order.
@@ -189,6 +191,10 @@ public actor AppleTVDevice: RemoteController {
             set(drops == 0 ? .connecting : .reconnecting)
             do {
                 try await establish()
+            } catch DeviceError.pairedStartAgain {
+                // The pairing worked, so there is nothing to wait for.
+                ATVLog.pairing.info("paired, opening a new connection")
+                continue
             } catch {
                 // The app waits for the user after a failure, and retries when the user asks
                 // for something. A retry loop in the background keeps the panel in an error.
@@ -320,8 +326,10 @@ public actor AppleTVDevice: RemoteController {
         record.companion = credentials
         record.macAddress = device.macAddress
         try await store.save(record, for: id)
-        // Verify once more to turn on the session cipher.
-        try await session.pairVerify(credentials: credentials)
+        // The Apple TV stops answering on this connection once the pairing is done, so a
+        // pair-verify here waits for a frame that never comes. The key is stored, and a
+        // new connection costs milliseconds.
+        throw DeviceError.pairedStartAgain
     }
 
     /// True when the Apple TV turned the key down.

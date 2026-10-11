@@ -71,7 +71,11 @@ public actor CompanionSession {
     private let eventsContinuation: AsyncStream<CompanionEvent>.Continuation
     private var nextXID: Int64 = 1
     private var pending = PendingReplies<Int64, OPACKValue>()
-    private var rawWaiters: [CheckedContinuation<CompanionFrame, Error>] = []
+    private var rawWaiters: [(id: Int, continuation: CheckedContinuation<CompanionFrame, Error>)] = []
+    private var lastRawWaiterID = 0
+    /// How long a pairing frame may take. The Apple TV answers in well under a second.
+    /// Without a limit a silent Apple TV holds the pairing until the socket dies.
+    static let pairingFrameTimeout: Duration = .seconds(10)
     private var reader: Task<Void, Never>?
     private var isVerified = false
     private var textSessionUUID: Data?
@@ -111,7 +115,7 @@ public actor CompanionSession {
         isVerified = false
         pending.failAll(CompanionError.notConnected)
         for waiter in rawWaiters {
-            waiter.resume(throwing: CompanionError.notConnected)
+            waiter.continuation.resume(throwing: CompanionError.notConnected)
         }
         rawWaiters.removeAll()
         eventsContinuation.finish()
@@ -119,15 +123,29 @@ public actor CompanionSession {
 
     // MARK: Inbound frames
 
-    private func nextRawFrame() async throws -> CompanionFrame {
-        try await withCheckedThrowingContinuation { continuation in
-            rawWaiters.append(continuation)
+    /// Waits for the next pairing frame, and gives up after `timeout`.
+    private func nextRawFrame(timeout: Duration) async throws -> CompanionFrame {
+        lastRawWaiterID += 1
+        let id = lastRawWaiterID
+        let watchdog = Task { [weak self] in
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            await self?.giveUpOnRawFrame(id)
         }
+        defer { watchdog.cancel() }
+        return try await withCheckedThrowingContinuation { continuation in
+            rawWaiters.append((id, continuation))
+        }
+    }
+
+    private func giveUpOnRawFrame(_ id: Int) {
+        guard let index = rawWaiters.firstIndex(where: { $0.id == id }) else { return }
+        rawWaiters.remove(at: index).continuation.resume(throwing: CompanionError.timeout)
     }
 
     private func dispatch(_ frame: CompanionFrame) {
         if frame.type.isAuth || !isVerified, !rawWaiters.isEmpty {
-            rawWaiters.removeFirst().resume(returning: frame)
+            rawWaiters.removeFirst().continuation.resume(returning: frame)
             return
         }
         guard frame.type == .eOPACK || frame.type == .uOPACK else {
@@ -293,7 +311,7 @@ public actor CompanionSession {
     }
 
     private func receivePairing() async throws -> Data {
-        let frame = try await nextRawFrame()
+        let frame = try await nextRawFrame(timeout: Self.pairingFrameTimeout)
         guard frame.type.isAuth else { throw CompanionError.unexpectedFrame(frame.type.rawValue) }
         let value = try OPACK.decode(frame.payload)
         guard let tlv = value["_pd"]?.dataValue else { throw CompanionError.badPayload }
