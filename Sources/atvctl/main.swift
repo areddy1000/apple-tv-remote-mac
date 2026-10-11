@@ -117,9 +117,11 @@ func connect(_ device: DiscoveredDevice, options: Options) async -> AppleTVDevic
     let controller = AppleTVDevice(device: device, identity: identity, store: store) { title in
         await readPIN(title: title, pinFile: options.pinFile)
     }
+    // Subscribe first. Events with no subscriber are dropped.
+    let events = controller.subscribe()
     await controller.connect()
     let deadline = ContinuousClock.now + .seconds(60)
-    for await event in controller.events {
+    for await event in events {
         if case .connection(let state) = event {
             switch state {
             case .connected: return controller

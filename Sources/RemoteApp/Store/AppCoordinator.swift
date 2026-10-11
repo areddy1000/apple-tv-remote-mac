@@ -83,6 +83,7 @@ final class AppCoordinator {
     /// Pairs a device from the list. The Apple TV shows a PIN, and the panel asks for it.
     func pair(id: String) {
         guard let device = store.devices.first(where: { $0.id == id }) else { return }
+        dropControllers(except: device.id)
         let controller = controller(for: device)
         store.attach(controller, name: device.name, connect: false)
         UserDefaults.standard.set(device.id, forKey: Self.lastDeviceKey)
@@ -91,10 +92,17 @@ final class AppCoordinator {
 
     /// Ends the link and goes back to the device list.
     func disconnect() {
-        if let id = store.selectedDeviceID, let controller = controllers[id] {
-            Task { await controller.disconnect() }
-        }
         store.detach()
+        dropControllers(except: nil)
+    }
+
+    /// Shuts down and forgets every controller but one. Only one Apple TV is in use at a time.
+    /// A controller that stays in the table keeps its loops and its memory.
+    private func dropControllers(except keep: String?) {
+        for (id, controller) in controllers where id != keep {
+            controllers[id] = nil
+            Task { await controller.shutdown() }
+        }
     }
 
     func select(_ device: DiscoveredDevice) {
@@ -107,6 +115,7 @@ final class AppCoordinator {
         }
         ATVLog.companion.info("selected \(device.name, privacy: .public)")
         UserDefaults.standard.set(device.id, forKey: Self.lastDeviceKey)
+        dropControllers(except: device.id)
         store.attach(controller(for: device), name: device.name)
     }
 
@@ -129,9 +138,10 @@ final class AppCoordinator {
     func forgetSelected() {
         guard let id = store.selectedDeviceID, let controller = controllers[id] else { return }
         store.detach()
+        controllers[id] = nil
         Task {
             await controller.forget()
-            controllers[id] = nil
+            await controller.shutdown()
             await refreshKnown()
         }
     }

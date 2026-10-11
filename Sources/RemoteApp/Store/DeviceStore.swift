@@ -111,8 +111,10 @@ final class DeviceStore {
         volumeChecked = false
         connection = .idle
 
+        // Subscribe before the connect starts, so the first events are not lost.
+        let events = controller.subscribe()
         eventTask = Task { [weak self] in
-            for await event in controller.events {
+            for await event in events {
                 guard let self, !Task.isCancelled else { return }
                 self.apply(event)
             }

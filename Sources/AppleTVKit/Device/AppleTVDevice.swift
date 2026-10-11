@@ -21,9 +21,9 @@ private enum QueuedCommand: Sendable {
 /// One Apple TV. Owns the Companion session, the credentials and the reconnect loop.
 public actor AppleTVDevice: RemoteController {
     public nonisolated let id: String
-    public nonisolated let events: AsyncStream<DeviceEvent>
 
-    private let eventsContinuation: AsyncStream<DeviceEvent>.Continuation
+    /// Each subscriber gets its own stream. A subscriber that stops ends only its stream.
+    private let hub = EventHub<DeviceEvent>()
     private let commands: AsyncStream<QueuedCommand>
     private let commandsContinuation: AsyncStream<QueuedCommand>.Continuation
     private let identity: CompanionIdentity
@@ -37,6 +37,8 @@ public actor AppleTVDevice: RemoteController {
     private var connectGeneration = 0
     private var connectLoop: Task<Void, Never>?
     private var commandLoop: Task<Void, Never>?
+    /// True after `shutdown`. The device then does nothing more.
+    private var isShutDown = false
 
     private var session: CompanionSession?
     private var sessionEvents: Task<Void, Never>?
@@ -60,8 +62,11 @@ public actor AppleTVDevice: RemoteController {
         self.identity = identity
         self.store = store
         self.pinProvider = pinProvider
-        (events, eventsContinuation) = AsyncStream.makeStream(of: DeviceEvent.self, bufferingPolicy: .unbounded)
         (commands, commandsContinuation) = AsyncStream.makeStream(of: QueuedCommand.self, bufferingPolicy: .unbounded)
+    }
+
+    public nonisolated func subscribe() -> AsyncStream<DeviceEvent> {
+        hub.subscribe()
     }
 
     // MARK: Hot path
@@ -76,9 +81,11 @@ public actor AppleTVDevice: RemoteController {
 
     private func startCommandLoop() {
         guard commandLoop == nil else { return }
-        commandLoop = Task { [weak self] in
-            guard let self else { return }
+        // The loop holds the device only for one command. A strong hold for the whole
+        // stream keeps the device alive for ever, because the device owns the stream.
+        commandLoop = Task { [weak self, commands] in
             for await command in commands {
+                guard let self else { return }
                 await self.perform(command)
             }
         }
@@ -118,13 +125,14 @@ public actor AppleTVDevice: RemoteController {
         // One step for each press. The key-up is swallowed so the step does not repeat.
         guard down else { return true }
         guard await volumeHook.step(up: up) else { return false }
-        if let level = await volumeHook.level() { eventsContinuation.yield(.volume(level)) }
+        if let level = await volumeHook.level() { hub.yield(.volume(level)) }
         return true
     }
 
     // MARK: Connection
 
     public func connect() async {
+        guard !isShutDown else { return }
         wantsConnection = true
         startCommandLoop()
         guard connectLoop == nil else { return }
@@ -145,6 +153,16 @@ public actor AppleTVDevice: RemoteController {
         set(.idle)
     }
 
+    /// Disconnects and ends every loop and stream. The owner drops the device after this.
+    public func shutdown() async {
+        await disconnect()
+        isShutDown = true
+        commandLoop?.cancel()
+        commandLoop = nil
+        commandsContinuation.finish()
+        hub.finish()
+    }
+
     /// Takes a fresh discovery record. Endpoints can arrive after the first sighting.
     public func update(device: DiscoveredDevice) {
         self.device = device
@@ -155,7 +173,7 @@ public actor AppleTVDevice: RemoteController {
 
     private func set(_ newState: ConnectionState) {
         state = newState
-        eventsContinuation.yield(.connection(newState))
+        hub.yield(.connection(newState))
     }
 
     private func runConnectLoop(generation: Int) async {
@@ -223,7 +241,7 @@ public actor AppleTVDevice: RemoteController {
         set(.connected)
         watch(session)
         if let power = try? await session.attentionState() {
-            eventsContinuation.yield(.power(power))
+            hub.yield(.power(power))
         }
         Task { await self.startAirPlay() }
     }
@@ -333,11 +351,11 @@ public actor AppleTVDevice: RemoteController {
     private func handle(_ event: CompanionEvent) {
         switch event {
         case .textInputStarted(let current):
-            eventsContinuation.yield(.textInput(.active(current: current)))
+            hub.yield(.textInput(.active(current: current)))
         case .textInputStopped:
-            eventsContinuation.yield(.textInput(.inactive))
+            hub.yield(.textInput(.inactive))
         case .attention(let power):
-            eventsContinuation.yield(.power(power))
+            hub.yield(.power(power))
         case .mediaFlags(let flags):
             // The volume bit changes with the output. Read the level when it is on.
             hasVolumeRoute = flags & CompanionSession.volumeFlag != 0
@@ -350,7 +368,7 @@ public actor AppleTVDevice: RemoteController {
     }
 
     private func publish(_ event: DeviceEvent) {
-        eventsContinuation.yield(event)
+        hub.yield(event)
     }
 
     private func wakeIfPossible() async {

@@ -6,12 +6,14 @@ import Foundation
 /// so the interface can run with no Apple TV on the network.
 public final class MockController: RemoteController, Sendable {
     public let id: String
-    public let events: AsyncStream<DeviceEvent>
-    private let continuation: AsyncStream<DeviceEvent>.Continuation
+    private let hub = EventHub<DeviceEvent>()
 
     public init(id: String = "mock") {
         self.id = id
-        (events, continuation) = AsyncStream.makeStream(of: DeviceEvent.self)
+    }
+
+    public func subscribe() -> AsyncStream<DeviceEvent> {
+        hub.subscribe()
     }
 
     public func button(_ button: RemoteButton, down: Bool) {
@@ -23,11 +25,11 @@ public final class MockController: RemoteController, Sendable {
     }
 
     public func typeText(_ text: String) async throws {
-        continuation.yield(.textInput(.active(current: text)))
+        hub.yield(.textInput(.active(current: text)))
     }
 
     public func clearText() async throws {
-        continuation.yield(.textInput(.active(current: "")))
+        hub.yield(.textInput(.active(current: "")))
     }
 
     public func launchableApps() async throws -> [LaunchableApp] {
@@ -55,25 +57,25 @@ public final class MockController: RemoteController, Sendable {
     public func volumeLevel() async throws -> Double? { 0.42 }
 
     public func setVolume(_ level: Double) async throws {
-        continuation.yield(.volume(level))
+        hub.yield(.volume(level))
     }
 
     public func powerState() async throws -> PowerState { .awake }
 
     public func wake() async {
-        continuation.yield(.power(.awake))
+        hub.yield(.power(.awake))
     }
 
     public func sleep() async {
-        continuation.yield(.power(.asleep))
+        hub.yield(.power(.asleep))
     }
 
     public func connect() async {
-        continuation.yield(.connection(.connecting))
+        hub.yield(.connection(.connecting))
         try? await Task.sleep(for: .milliseconds(400))
-        continuation.yield(.connection(.connected))
-        continuation.yield(.power(.awake))
-        continuation.yield(.nowPlaying(NowPlaying(
+        hub.yield(.connection(.connected))
+        hub.yield(.power(.awake))
+        hub.yield(.nowPlaying(NowPlaying(
             title: "Sample Film",
             subtitle: "A subtitle",
             appName: "Apple TV",
@@ -85,6 +87,6 @@ public final class MockController: RemoteController, Sendable {
     }
 
     public func disconnect() async {
-        continuation.yield(.connection(.idle))
+        hub.yield(.connection(.idle))
     }
 }

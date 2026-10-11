@@ -265,7 +265,10 @@ public enum DeviceEvent: Sendable {
 /// The control surface the UI talks to. `AppleTVDevice` and `MockController` conform.
 public protocol RemoteController: AnyObject, Sendable {
     var id: String { get }
-    var events: AsyncStream<DeviceEvent> { get }
+
+    /// Returns a new event stream. The stream of the last subscriber ends.
+    /// A subscriber that stops does not end the events for the next one.
+    func subscribe() -> AsyncStream<DeviceEvent>
 
     /// Sends a button down or up event. Call is fire and forget to keep latency low.
     func button(_ button: RemoteButton, down: Bool)
