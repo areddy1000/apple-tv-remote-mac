@@ -33,7 +33,8 @@ struct StatusCard: View {
             }
         }
         .padding(12)
-        .frame(height: Tokens.compactCardHeight, alignment: .top)
+        // A short message sits in the middle of the fixed height, not at the top.
+        .frame(height: Tokens.compactCardHeight, alignment: .center)
         .background(
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Tokens.surfaceRaised)
