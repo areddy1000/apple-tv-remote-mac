@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import AppleTVKit
 
-/// The device list shows every Apple TV the app knows: found on the network, paired, or both.
+/// The device list shows the Apple TVs on the network now, and marks the paired ones.
 @Suite("KnownDeviceTests")
 struct KnownDeviceTests {
     let creds = HAPCredentials(ltpk: Data([1]), ltsk: Data([2]), accessoryID: Data([3]), clientID: Data([4]))
@@ -20,13 +20,13 @@ struct KnownDeviceTests {
         #expect(list.map(\.state) == [.notPaired])
     }
 
-    @Test func aPairedTVThatIsAwayIsNotOnNetwork() {
-        let list = KnownDevice.merge(discovered: [], stored: ["b": StoredDevice(name: "Bedroom", companion: creds)])
-        #expect(list == [KnownDevice(id: "b", name: "Bedroom", model: "Apple TV", state: .notOnNetwork)])
-    }
-
-    @Test func anAwayTVWithoutAKeyIsLeftOut() {
-        #expect(KnownDevice.merge(discovered: [], stored: ["b": StoredDevice(name: "Bedroom")]).isEmpty)
+    // The list shows only Apple TVs on the network now, never ones that were paired before.
+    @Test func anAwayTVIsLeftOut() {
+        let list = KnownDevice.merge(discovered: [], stored: [
+            "b": StoredDevice(name: "Bedroom", companion: creds),
+            "c": StoredDevice(name: "Office"),
+        ])
+        #expect(list.isEmpty)
     }
 
     @Test func theListIsSortedByName() {

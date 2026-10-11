@@ -96,8 +96,8 @@ Click the menu bar item, or press Control-Option-R, to open the remote. While me
 item shows the artwork and the title.
 
 At launch, the app connects by itself only to a paired Apple TV, the last used one first.
-Without a link, the panel shows the list of known Apple TVs: the ones on the network, and the
-paired ones that are away. Click an Apple TV to open it. There you can connect to a paired
+Without a link, the panel shows the Apple TVs on the network now. An Apple TV that was paired
+before but is away does not show. Click an Apple TV to open it. There you can connect to a paired
 Apple TV, or pair a new one. Nothing connects or pairs until you click. A pairing shows a PIN
 on the TV, which turns the TV on.
 

@@ -68,7 +68,7 @@ final class DeviceStore {
     var keyboardVisible = false
     /// True while the user drags the volume slider. TV reports are ignored then.
     var volumeDragging = false
-    /// The Apple TVs for the device list: found on the network, paired, or both.
+    /// The Apple TVs on the network now, for the device list.
     var knownDevices: [KnownDevice] = []
 
     // MARK: Controller

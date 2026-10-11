@@ -1,14 +1,12 @@
 import Foundation
 
-/// One row of the device list: an Apple TV on the network, a paired one, or both.
+/// One row of the device list: an Apple TV on the network now, paired or not.
 public struct KnownDevice: Identifiable, Equatable, Sendable {
     public enum State: Equatable, Sendable {
         /// On the network, with a stored pairing key.
         case paired
         /// On the network, with no pairing key.
         case notPaired
-        /// Paired before, but not on the network now.
-        case notOnNetwork
     }
 
     public let id: String
@@ -24,10 +22,10 @@ public struct KnownDevice: Identifiable, Equatable, Sendable {
         self.state = state
     }
 
-    /// Merges the devices on the network with the stored records, sorted by name.
-    /// A stored record without a key and off the network is left out, because nothing can use it.
+    /// Lists the devices on the network, marks the paired ones, and sorts them by name.
+    /// An Apple TV that is not on the network is left out, even when it was paired before.
     public static func merge(discovered: [DiscoveredDevice], stored: [String: StoredDevice]) -> [KnownDevice] {
-        var list = discovered.map { device in
+        discovered.map { device in
             KnownDevice(
                 id: device.id,
                 name: device.name,
@@ -35,11 +33,6 @@ public struct KnownDevice: Identifiable, Equatable, Sendable {
                 state: stored[device.id]?.companion != nil ? .paired : .notPaired
             )
         }
-        let found = Set(discovered.map(\.id))
-        for (id, record) in stored where record.companion != nil && !found.contains(id) {
-            list.append(KnownDevice(id: id, name: record.name, model: DiscoveredDevice.displayName(forModel: nil),
-                                    state: .notOnNetwork))
-        }
-        return list.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 }

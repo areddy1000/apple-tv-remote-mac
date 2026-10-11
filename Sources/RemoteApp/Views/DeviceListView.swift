@@ -2,7 +2,7 @@ import AppKit
 import AppleTVKit
 import SwiftUI
 
-/// The Apple TVs the app knows. It shows when no link is up.
+/// The Apple TVs on the network now. It shows when no link is up.
 /// A click opens one Apple TV. Nothing connects or pairs until the user asks on that screen.
 struct DeviceListView: View {
     @Environment(DeviceStore.self) private var store
@@ -76,11 +76,11 @@ private struct DeviceRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            DeviceIcon(size: 36, dimmed: device.state == .notOnNetwork)
+            DeviceIcon(size: 36)
             VStack(alignment: .leading, spacing: 2) {
                 Text(device.name)
                     .font(Tokens.body)
-                    .foregroundStyle(device.state == .notOnNetwork ? Tokens.inkSecondary : Tokens.ink)
+                    .foregroundStyle(Tokens.ink)
                     .lineLimit(1)
                 Text(device.state.label)
                     .font(Tokens.caption)
@@ -122,7 +122,7 @@ private struct DeviceDetailView: View {
             .keyboardShortcut(.cancelAction)
 
             VStack(spacing: 10) {
-                DeviceIcon(size: 64, dimmed: device.state == .notOnNetwork)
+                DeviceIcon(size: 64)
                 Text(device.name)
                     .font(Tokens.deviceName)
                 Text("\(device.model) · \(device.state.label)")
@@ -146,11 +146,6 @@ private struct DeviceDetailView: View {
                     Text("Your TV will show a code.")
                         .font(Tokens.caption)
                         .foregroundStyle(Tokens.inkTertiary)
-                case .notOnNetwork:
-                    Text("This Apple TV is not on the network.")
-                        .font(Tokens.body)
-                        .foregroundStyle(Tokens.inkSecondary)
-                        .multilineTextAlignment(.center)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -162,7 +157,6 @@ private struct DeviceDetailView: View {
 /// The Apple TV symbol on a rounded tile.
 private struct DeviceIcon: View {
     let size: CGFloat
-    var dimmed = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.22, style: .continuous)
@@ -171,7 +165,7 @@ private struct DeviceIcon: View {
             .overlay(
                 Image(systemName: "appletv.fill")
                     .font(.system(size: size * 0.42, weight: .medium))
-                    .foregroundStyle(dimmed ? Tokens.inkTertiary : Tokens.inkSecondary)
+                    .foregroundStyle(Tokens.inkSecondary)
             )
             .accessibilityHidden(true)
     }
@@ -182,7 +176,6 @@ extension KnownDevice.State {
         switch self {
         case .paired: "Paired"
         case .notPaired: "Not paired"
-        case .notOnNetwork: "Not on network"
         }
     }
 }
