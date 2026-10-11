@@ -149,6 +149,8 @@ public enum MediaCommand: String, Sendable, CaseIterable {
 public enum ConnectionState: Sendable, Equatable {
     case idle
     case connecting
+    /// The Apple TV has no pairing this Mac can use. The user starts the pairing.
+    case needsPairing
     case awaitingPIN
     case pairing
     case connected
@@ -161,11 +163,20 @@ public enum ConnectionState: Sendable, Equatable {
         switch self {
         case .idle: "Not Connected"
         case .connecting: "Connecting"
+        case .needsPairing: "Needs Pairing"
         case .awaitingPIN: "Enter PIN"
         case .pairing: "Pairing"
         case .connected: "Connected"
         case .reconnecting: "Reconnecting"
         case .failed: "Connection Failed"
+        }
+    }
+
+    /// True while the app is working on the link. The UI shows a spinner.
+    public var isBusy: Bool {
+        switch self {
+        case .connecting, .reconnecting, .pairing, .awaitingPIN: true
+        default: false
         }
     }
 }

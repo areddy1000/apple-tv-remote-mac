@@ -84,6 +84,13 @@ final class AppCoordinator {
         }
     }
 
+    /// Pairs the selected Apple TV. The PIN sheet lives in the window, so it opens first.
+    func pairSelected() {
+        guard let id = store.selectedDeviceID, let controller = controllers[id] else { return }
+        RemoteApp.summon()
+        Task { await controller.pair() }
+    }
+
     func wakeSelected() {
         guard let id = store.selectedDeviceID, let controller = controllers[id] else { return }
         Task { await controller.wake() }

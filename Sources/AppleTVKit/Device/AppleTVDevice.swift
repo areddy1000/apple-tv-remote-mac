@@ -4,6 +4,14 @@ import Network
 /// Asks the user for the PIN the TV shows. Returns nil on cancel.
 public typealias PINProvider = @Sendable (_ title: String) async -> String?
 
+public enum DeviceError: Error, Sendable, Equatable {
+    /// The Apple TV has no pairing this Mac can use.
+    ///
+    /// The app never pairs on its own, because pairing puts a PIN on the screen and turns
+    /// the television on. The user starts it with `pair()`.
+    case needsPairing
+}
+
 /// A command queued from the UI. The queue keeps down and up in order.
 private enum QueuedCommand: Sendable {
     case button(RemoteButton, down: Bool)
@@ -42,6 +50,8 @@ public actor AppleTVDevice: RemoteController {
     private let volumeHook = VolumeCommandRunner()
     /// True when the Apple TV reports a volume route. Nil until it first says.
     private var hasVolumeRoute: Bool?
+    /// True for one attempt after the user asks to pair. Only then may a PIN appear.
+    private var pairingRequested = false
     /// Set when the user declines the AirPlay PIN. Cleared on the next `connect`.
 
     public init(device: DiscoveredDevice, identity: CompanionIdentity, store: CredentialStore, pinProvider: @escaping PINProvider) {
@@ -163,6 +173,11 @@ public actor AppleTVDevice: RemoteController {
                 set(.idle)
                 wantsConnection = false
                 break
+            } catch DeviceError.needsPairing {
+                // Retrying cannot help. A PIN would turn the television on, so wait.
+                set(.needsPairing)
+                wantsConnection = false
+                break
             } catch {
                 ATVLog.companion.error("connect failed: \(String(describing: error), privacy: .public)")
                 set(.failed(describe(error)))
@@ -191,12 +206,9 @@ public actor AppleTVDevice: RemoteController {
         }
         ATVLog.companion.info("connecting to \(self.device.name, privacy: .public)")
         let session = CompanionSession(endpoint: endpoint, identity: identity)
-        do {
-            try await session.open()
-        } catch {
-            await wakeIfPossible()
-            throw error
-        }
+        // A magic packet wakes the Apple TV, which turns the television on. Only `wake()`
+        // may do that, because the user asked for it. A reconnect waits instead.
+        try await session.open()
         do {
             try await authenticate(session)
             try await session.startSession()
@@ -213,23 +225,28 @@ public actor AppleTVDevice: RemoteController {
         Task { await self.startAirPlay() }
     }
 
-    /// Verifies the stored key, or pairs with a PIN when there is none or the TV rejects it.
+    /// Verifies the stored key. Pairs only when the user asked for it.
+    ///
+    /// The stored key is never deleted here. A pairing the user starts replaces it, and
+    /// everything else leaves it alone, so one bad moment on the network cannot cost the
+    /// user their pairing.
     private func authenticate(_ session: CompanionSession) async throws {
         let stored = try? await store.device(for: id)
-        if let credentials = stored?.companion {
+        if let credentials = stored?.companion, !pairingRequested {
             do {
                 try await session.pairVerify(credentials: credentials)
                 return
             } catch {
-                ATVLog.pairing.error("pair-verify failed, pairing again: \(String(describing: error), privacy: .public)")
-                // Drop the stale key. The next attempt asks for a PIN.
-                if var record = stored {
-                    record.companion = nil
-                    try? await store.save(record, for: id)
-                }
+                ATVLog.pairing.error("pair-verify failed: \(String(describing: error), privacy: .public)")
+                // Only the Apple TV turning the key down means the key is dead. Anything
+                // else is the network, and the next attempt can still work.
+                if Self.isRejection(error) { throw DeviceError.needsPairing }
                 throw error
             }
         }
+        guard pairingRequested else { throw DeviceError.needsPairing }
+        pairingRequested = false
+
         set(.awaitingPIN)
         let credentials = try await session.pairSetup { [pinProvider, device] in
             await pinProvider("Pair with \(device.name)")
@@ -241,6 +258,35 @@ public actor AppleTVDevice: RemoteController {
         try await store.save(record, for: id)
         // Verify once more to turn on the session cipher.
         try await session.pairVerify(credentials: credentials)
+    }
+
+    /// True when the Apple TV turned the key down.
+    ///
+    /// The handshake ran and the Apple TV refused it. A socket that closed, a timeout or a
+    /// cancelled task are not refusals, and the stored key is still good.
+    static func isRejection(_ error: any Error) -> Bool {
+        switch error {
+        case HAPError.accessoryError, HAPError.proofMismatch, HAPError.signatureInvalid,
+             HAPError.identifierMismatch, HAPError.decryptFailed:
+            true
+        default:
+            false
+        }
+    }
+
+    /// Pairs with a PIN. Only the user starts this.
+    ///
+    /// The Apple TV shows the PIN on the screen, which turns the television on, so the app
+    /// never does it alone.
+    public func pair() async {
+        pairingRequested = true
+        if connectLoop != nil {
+            // Drop the loop that is waiting, so the next attempt starts now.
+            connectLoop?.cancel()
+            connectLoop = nil
+            await dropSession()
+        }
+        await connect()
     }
 
     /// Consumes the session events. When the stream ends the link is gone.

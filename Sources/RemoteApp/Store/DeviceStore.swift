@@ -291,7 +291,7 @@ final class DeviceStore {
     var statusColor: Color {
         switch connection {
         case .connected: power == .asleep ? Tokens.inkTertiary : .green
-        case .connecting, .reconnecting, .pairing, .awaitingPIN: .orange
+        case .connecting, .reconnecting, .pairing, .awaitingPIN, .needsPairing: .orange
         case .failed: Tokens.danger
         case .idle: Tokens.inkTertiary
         }
