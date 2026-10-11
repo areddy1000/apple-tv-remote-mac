@@ -1,3 +1,4 @@
+import AppKit
 import AppleTVKit
 import SwiftUI
 
@@ -42,7 +43,47 @@ struct MenuBarPanel: View {
         }
         .animation(Motion.crossfade, value: store.connection == .awaitingPIN)
         // The store polls the TV less while the panel is closed.
-        .onAppear { store.panelVisible = true }
-        .onDisappear { store.panelVisible = false }
+        // The menu bar window stays alive while closed, so onAppear and onDisappear do not
+        // come on each open. The occlusion state of the window tells when the panel shows.
+        .background(PanelVisibility { store.panelVisible = $0 })
+    }
+}
+
+/// Reports when the menu bar panel window shows or hides, from its occlusion state.
+struct PanelVisibility: NSViewRepresentable {
+    let onChange: (Bool) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ view: NSView, context: Context) {
+        context.coordinator.onChange = onChange
+        DispatchQueue.main.async {
+            if let window = view.window { context.coordinator.watch(window) }
+        }
+    }
+
+    /// A selector observer goes away with the coordinator, so it needs no remove step.
+    @MainActor
+    final class Coordinator: NSObject {
+        var onChange: (Bool) -> Void = { _ in }
+        private weak var window: NSWindow?
+
+        func watch(_ window: NSWindow) {
+            guard self.window !== window else { return }
+            if let old = self.window {
+                NotificationCenter.default.removeObserver(self, name: NSWindow.didChangeOcclusionStateNotification, object: old)
+            }
+            self.window = window
+            NotificationCenter.default.addObserver(self, selector: #selector(occlusionChanged(_:)),
+                                                   name: NSWindow.didChangeOcclusionStateNotification, object: window)
+            onChange(window.occlusionState.contains(.visible))
+        }
+
+        @objc private func occlusionChanged(_ notification: Notification) {
+            guard let window = notification.object as? NSWindow else { return }
+            onChange(window.occlusionState.contains(.visible))
+        }
     }
 }
