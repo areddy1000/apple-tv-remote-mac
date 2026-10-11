@@ -37,13 +37,21 @@ struct RemoteBody: View {
                         .frame(height: 220)
                 }
                 TransportBar()
-                if store.keyboardVisible {
-                    KeyboardBar()
-                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6)))
-                }
             }
             .padding(Tokens.inset)
             .animation(reduceMotion ? Motion.reduced : Motion.panelOpen, value: store.nowPlaying == nil)
+            // The bar floats over the remote. In the layout it would change the height, and
+            // the menu bar window grows for that but never shrinks back. The window then
+            // centres the smaller remote and the desktop shows through the top and bottom.
+            .overlay(alignment: .bottom) {
+                if store.keyboardVisible {
+                    KeyboardBar()
+                        .padding(.horizontal, Tokens.inset)
+                        .padding(.bottom, Tokens.inset)
+                        .transition(reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 6)))
+                }
+            }
+            .animation(reduceMotion ? Motion.reduced : Motion.panelOpen, value: store.keyboardVisible)
 
             if store.paletteVisible {
                 Color.black.opacity(0.001)
