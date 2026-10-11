@@ -20,6 +20,7 @@ struct DevicePicker: View {
             Button("Sleep") { store.click(.sleep) }
             Button("Screensaver") { store.click(.screensaver) }
             Divider()
+            OpenAtLoginToggle()
             Button("Quit Apple TV Remote") { NSApplication.shared.terminate(nil) }
                 .keyboardShortcut("q", modifiers: .command)
         } label: {

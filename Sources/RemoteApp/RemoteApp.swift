@@ -8,7 +8,8 @@ struct RemoteApp: App {
     @State private var icons = AppIconStore()
 
     var body: some Scene {
-        MenuBarExtra {
+        // The menu bar item shows only while an Apple TV is on the network.
+        MenuBarExtra(isInserted: Binding(get: { !appDelegate.store.devices.isEmpty }, set: { _ in })) {
             MenuBarPanel()
                 .environment(appDelegate.store)
                 .environment(appDelegate.coordinator)
@@ -38,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        LoginItem.configureOnFirstLaunch()
         keyMonitor.start()
         coordinator.start()
         hotKey = HotKey { MenuBarPanelOpener.open() }

@@ -32,6 +32,7 @@ struct DeviceListView: View {
                     .font(Tokens.deviceName)
                 Spacer()
                 Menu {
+                    OpenAtLoginToggle()
                     Button("Quit Apple TV Remote") { NSApplication.shared.terminate(nil) }
                         .keyboardShortcut("q", modifiers: .command)
                 } label: {
