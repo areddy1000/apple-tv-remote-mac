@@ -3,6 +3,7 @@ import Foundation
 /// Now-playing for one Apple TV over the AirPlay 2 MRP tunnel.
 /// It verifies with the Companion pairing key, opens the channels and runs MRP.
 /// The TV keeps one pairing store for both services, so one PIN serves both links.
+/// When the tunnel ends, `nowPlaying` ends too. The owner then drops this object.
 public actor AirPlayNowPlaying {
     private let host: String
     private let port: UInt16
@@ -29,7 +30,7 @@ public actor AirPlayNowPlaying {
 
     /// Verifies with the pairing key, then opens the tunnel.
     public func connect(credentials: HAPCredentials) async throws {
-        await close()
+        await teardown()
         let identity = AirPlayIdentity(name: name, deviceID: deviceAddress, macAddress: deviceAddress)
         let session = AP2Session(host: host, port: port, identity: identity)
         try await session.openControl()
@@ -46,7 +47,16 @@ public actor AirPlayNowPlaying {
                 await self.forward(value)
             }
             await self?.forward(nil)
+            await self?.tunnelEnded(mrp)
         }
+    }
+
+    /// Closes everything when the MRP stream ends, for example after a feedback post fails.
+    /// Without this, `isConnected` stays true and commands go to a dead link.
+    private func tunnelEnded(_ ended: MRPSession) async {
+        guard mrp === ended else { return }
+        ATVLog.airplay.info("now-playing tunnel closed")
+        await close()
     }
 
     private func forward(_ value: NowPlaying?) {
@@ -72,12 +82,20 @@ public actor AirPlayNowPlaying {
 
     public var isConnected: Bool { mrp != nil }
 
+    /// Closes the tunnel and ends `nowPlaying`.
     public func close() async {
+        await teardown()
+        nowPlayingContinuation.finish()
+    }
+
+    private func teardown() async {
         forwardTask?.cancel()
         forwardTask = nil
+        let mrp = self.mrp
+        let session = self.session
+        self.mrp = nil
+        self.session = nil
         await mrp?.close()
-        mrp = nil
         await session?.close()
-        session = nil
     }
 }

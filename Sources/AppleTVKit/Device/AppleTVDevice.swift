@@ -47,6 +47,8 @@ public actor AppleTVDevice: RemoteController {
     private var airplay: AirPlayNowPlaying?
     private var airplayTask: Task<Void, Never>?
     private var airplayStarting = false
+    /// Closes the tunnel while the TV sleeps, and keeps a failed tunnel from retrying.
+    private var airplayGate = AirPlayGate()
 
     /// The user's volume commands, for televisions that give the Apple TV no volume route.
     private let volumeHook = VolumeCommandRunner()
@@ -135,6 +137,8 @@ public actor AppleTVDevice: RemoteController {
         guard !isShutDown else { return }
         wantsConnection = true
         startCommandLoop()
+        // A connect the user asks for may try the AirPlay tunnel again.
+        if connectLoop == nil { airplayGate.reset() }
         guard connectLoop == nil else { return }
         connectGeneration += 1
         let generation = connectGeneration
@@ -164,9 +168,11 @@ public actor AppleTVDevice: RemoteController {
     }
 
     /// Takes a fresh discovery record. Endpoints can arrive after the first sighting.
+    /// Only a new AirPlay endpoint starts the tunnel. Other Bonjour updates do nothing.
     public func update(device: DiscoveredDevice) {
+        let changed = AirPlayGate.endpointChanged(from: self.device.airplayEndpoint, to: device.airplayEndpoint)
         self.device = device
-        if state == .connected, device.airplayEndpoint != nil {
+        if changed, state == .connected {
             Task { await self.startAirPlay() }
         }
     }
@@ -242,6 +248,7 @@ public actor AppleTVDevice: RemoteController {
         watch(session)
         if let power = try? await session.attentionState() {
             hub.yield(.power(power))
+            observe(power)
         }
         Task { await self.startAirPlay() }
     }
@@ -356,6 +363,7 @@ public actor AppleTVDevice: RemoteController {
             hub.yield(.textInput(.inactive))
         case .attention(let power):
             hub.yield(.power(power))
+            observe(power)
         case .mediaFlags(let flags):
             // The volume bit changes with the output. Read the level when it is on.
             hasVolumeRoute = flags & CompanionSession.volumeFlag != 0
@@ -371,6 +379,19 @@ public actor AppleTVDevice: RemoteController {
         hub.yield(event)
     }
 
+    /// Opens or closes the AirPlay tunnel when the power state changes.
+    private func observe(_ power: PowerState) {
+        switch airplayGate.observe(power) {
+        case .open:
+            Task { await self.startAirPlay() }
+        case .close:
+            ATVLog.airplay.info("Apple TV asleep, closing now-playing tunnel")
+            Task { await self.stopAirPlay() }
+        case .none:
+            break
+        }
+    }
+
     private func wakeIfPossible() async {
         let storedAddress = try? await store.device(for: id)?.macAddress
         guard let address = device.macAddress ?? storedAddress else { return }
@@ -380,9 +401,9 @@ public actor AppleTVDevice: RemoteController {
 
     // MARK: AirPlay now-playing
 
-    /// Opens the AirPlay tunnel for now-playing. Pairs with a second PIN on first use.
+    /// Opens the AirPlay tunnel for now-playing. It uses the Companion key and asks for no PIN.
     private func startAirPlay() async {
-        guard airplay == nil, !airplayStarting else { return }
+        guard airplay == nil, !airplayStarting, state == .connected, airplayGate.mayOpen else { return }
         guard let endpoint = device.airplayEndpoint else {
             ATVLog.airplay.info("no AirPlay endpoint yet for \(self.device.name, privacy: .public)")
             return
@@ -402,17 +423,33 @@ public actor AppleTVDevice: RemoteController {
                 deviceAddress: identity.deviceAddress
             )
             try await tunnel.connect(credentials: record)
+            // The link dropped or the TV fell asleep while the tunnel opened.
+            guard state == .connected, airplayGate.mayOpen else {
+                await tunnel.close()
+                return
+            }
             airplay = tunnel
             airplayTask = Task { [weak self] in
                 for await info in tunnel.nowPlaying {
                     guard let self else { return }
                     await self.publish(.nowPlaying(info))
                 }
+                await self?.airplayEnded(tunnel)
             }
             ATVLog.airplay.info("now-playing tunnel open")
         } catch {
+            // The tunnel waits for the next connect or wake. A timer retry costs power all day.
+            airplayGate.markFailed()
             ATVLog.airplay.error("now-playing failed: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    /// Clears a tunnel that ended by itself. Media commands then use the Companion link.
+    private func airplayEnded(_ tunnel: AirPlayNowPlaying) {
+        guard airplay === tunnel else { return }
+        airplay = nil
+        airplayTask = nil
+        hub.yield(.nowPlaying(nil))
     }
 
     private func resolveWithTimeout(_ endpoint: NWEndpoint) async throws -> (host: String, port: UInt16) {
@@ -431,8 +468,11 @@ public actor AppleTVDevice: RemoteController {
     private func stopAirPlay() async {
         airplayTask?.cancel()
         airplayTask = nil
-        await airplay?.close()
+        guard let tunnel = airplay else { return }
         airplay = nil
+        await tunnel.close()
+        // Nothing reports now-playing without the tunnel, so the UI must not keep the old item.
+        hub.yield(.nowPlaying(nil))
     }
 
     // MARK: Requests
@@ -491,7 +531,9 @@ public actor AppleTVDevice: RemoteController {
     }
 
     public func powerState() async throws -> PowerState {
-        try await liveSession().attentionState()
+        let power = try await liveSession().attentionState()
+        observe(power)
+        return power
     }
 
     /// Wakes the Apple TV with a magic packet and the HID wake key.
