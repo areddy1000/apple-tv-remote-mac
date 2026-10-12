@@ -13,6 +13,8 @@ struct StatusCard: View {
 
     var body: some View {
         HStack(spacing: 12) {
+            // Equal spacers on both sides put the message in the middle of the card.
+            Spacer(minLength: 0)
             icon
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
