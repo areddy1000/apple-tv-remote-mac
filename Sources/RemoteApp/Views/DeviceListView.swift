@@ -51,13 +51,11 @@ struct DeviceListView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             if store.knownDevices.isEmpty {
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Looking for Apple TVs…")
-                        .font(Tokens.body)
-                        .foregroundStyle(Tokens.inkSecondary)
-                }
-                .padding(.top, 8)
+                // Bonjour keeps looking in the background. An Apple TV shows here when it appears.
+                Text("No devices found")
+                    .font(Tokens.body)
+                    .foregroundStyle(Tokens.inkSecondary)
+                    .padding(.top, 8)
             } else {
                 VStack(spacing: 6) {
                     ForEach(store.knownDevices) { device in

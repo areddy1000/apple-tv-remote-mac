@@ -8,8 +8,7 @@ struct RemoteApp: App {
     @State private var icons = AppIconStore()
 
     var body: some Scene {
-        // The menu bar item shows only while an Apple TV is on the network.
-        MenuBarExtra(isInserted: Binding(get: { !appDelegate.store.devices.isEmpty }, set: { _ in })) {
+        MenuBarExtra {
             MenuBarPanel()
                 .environment(appDelegate.store)
                 .environment(appDelegate.coordinator)
